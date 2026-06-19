@@ -140,6 +140,22 @@ describe("Scanner seed + poll (テスト12)", () => {
     expect(r.sessionTitles.get("k")).toBe("manual");
   });
 
+  test("timestamp 不在の行は toolEvents に含めない（record 側との対称化）", async () => {
+    const sc = new Scanner(join(root, "projects"));
+    const proj5 = join(root, "projects", "-ts-null");
+    mkdirSync(proj5, { recursive: true });
+    const f = join(proj5, "s.jsonl");
+    // timestamp フィールドを欠落させた assistant 行（usage 無し）に tool_use のみ持たせる
+    const line = JSON.stringify({
+      type: "assistant",
+      message: { model: "m", content: [{ type: "tool_use", name: "GhostTool", id: "g1" }] },
+      sessionId: "s",
+    });
+    writeFileSync(f, line + "\n");
+    const r = await sc.seed();
+    expect(r.toolEvents.some((e) => e.uses.some((u) => u.name === "GhostTool"))).toBe(false);
+  });
+
   test("subagent ファイルの tool_use は toolEvents に含めない（二重計上回避）", async () => {
     const sc = new Scanner(join(root, "projects"));
     const subDir = join(proj, "s", "subagents", "workflows", "wf");

@@ -9,8 +9,10 @@ import {
 } from "../src/render/bars.ts";
 
 describe("整形ヘルパ", () => {
-  test("formatTokens は k/M に丸める", () => {
+  test("formatTokens は k/M に丸める（<10k は小数2桁、10k 以上は1桁）", () => {
     expect(formatTokens(950)).toBe("950");
+    expect(formatTokens(1_234)).toBe("1.23k");
+    expect(formatTokens(9_999)).toBe("10.00k");
     expect(formatTokens(12_300)).toBe("12.3k");
     expect(formatTokens(1_250_000)).toBe("1.25M");
   });

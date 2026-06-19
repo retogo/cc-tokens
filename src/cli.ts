@@ -3,7 +3,7 @@ import { parseArgs } from "node:util";
 import { claudeProjectsDir } from "./paths.ts";
 import { loadConfig } from "./config.ts";
 import { Scanner } from "./scan.ts";
-import { buildSnapshot, rangeStart } from "./snapshot.ts";
+import { buildBreakdowns, buildSnapshot, rangeStart } from "./snapshot.ts";
 import type { Since } from "./snapshot.ts";
 import { renderReport, renderUsage } from "./render/report.ts";
 import type { ByAxis } from "./render/report.ts";
@@ -52,6 +52,21 @@ function parseAxes(v: string | undefined, fallback: ByAxis[]): ByAxis[] {
     .filter((s): s is ByAxis => valid.has(s));
 }
 
+/** 数値フラグを検証。非数値や非正数は警告を出して undefined（呼び出し側で既定にフォールバック）。 */
+function parsePositiveNumber(
+  raw: string | undefined,
+  flag: string,
+  parser: (s: string) => number,
+): number | undefined {
+  if (raw === undefined) return undefined;
+  const n = parser(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    process.stderr.write(`Invalid --${flag}: ${raw} (must be a positive number; using default)\n`);
+    return undefined;
+  }
+  return n;
+}
+
 async function main() {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
@@ -76,7 +91,7 @@ async function main() {
 
   const root = values.root || claudeProjectsDir();
   const config = await loadConfig();
-  const topN = values.top ? Math.max(1, parseInt(values.top, 10)) : undefined;
+  const topN = parsePositiveNumber(values.top, "top", (s) => parseInt(s, 10));
 
   if (cmd === "usage") {
     const now = Date.now();
@@ -92,9 +107,8 @@ async function main() {
   }
 
   if (cmd === "watch") {
-    const intervalMs = values.interval
-      ? Math.max(1, parseFloat(values.interval)) * 1000
-      : config.intervalSec * 1000;
+    const intervalSec = parsePositiveNumber(values.interval, "interval", parseFloat);
+    const intervalMs = (intervalSec ?? config.intervalSec) * 1000;
     await watch(root, config, {
       intervalMs,
       topN: topN ?? 6,
@@ -114,28 +128,22 @@ async function main() {
     const official = values.official ? await safeOfficial(now) : null;
     const snap = buildSnapshot(scan, config, now, official);
 
-    let records = scan.records;
-    let toolEvents = scan.toolEvents;
-    if (since === "block") {
-      // 現在の5hウィンドウ（公式 reset 起点 or 直近5h）
-      records = records.filter((r) => r.ts >= snap.windowStart && r.ts <= now);
-      toolEvents = toolEvents.filter(
-        (e) => e.ts === null || (e.ts >= snap.windowStart && e.ts <= now),
-      );
-    } else if (from !== null) {
-      records = records.filter((r) => r.ts >= from);
-      toolEvents = toolEvents.filter((e) => e.ts === null || e.ts >= from);
-    }
+    // block は snap.breakdowns（=5h ウィンドウ集計）をそのまま使い、
+    // since=今日/24h/7d/30d/all のときだけ独自範囲の Breakdowns を組み立てる。
+    const breakdowns =
+      since === "block"
+        ? snap.breakdowns
+        : buildBreakdowns(
+            from !== null ? scan.records.filter((r) => r.ts >= from) : scan.records,
+            from !== null ? scan.toolEvents.filter((e) => e.ts >= from) : scan.toolEvents,
+            { weighting: config.weighting, overrides: config.priceOverrides },
+          );
 
-    const body = renderReport(
-      snap,
-      { label: since, records, toolEvents },
-      {
-        topN: topN ?? 8,
-        axes: parseAxes(values.by, ["tool", "model", "session", "project"]),
-        expand: values.expand ?? false,
-      },
-    );
+    const body = renderReport(snap, breakdowns, since, {
+      topN: topN ?? 8,
+      axes: parseAxes(values.by, ["tool", "model", "session", "project"]),
+      expand: values.expand ?? false,
+    });
     process.stdout.write(body + "\n");
     return;
   }

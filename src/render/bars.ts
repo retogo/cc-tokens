@@ -7,7 +7,7 @@ const EMPTY = "░";
 /** トークン数を 12.3k / 1.25M に丸める。 */
 export function formatTokens(n: number): string {
   if (n < 1000) return String(Math.round(n));
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 1)}k`;
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 2 : 1)}k`;
   return `${(n / 1_000_000).toFixed(2)}M`;
 }
 

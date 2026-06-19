@@ -7,9 +7,10 @@ import type {
 } from "./types.ts";
 import type { Config } from "./config.ts";
 import type { ScanResult } from "./scan.ts";
-import type { ToolBreakdownRow } from "./attribute.ts";
+import type { DrillNode, ToolBreakdownRow, ToolEvent } from "./attribute.ts";
 import type { OfficialUsage } from "./official.ts";
-import { buildToolBreakdown } from "./attribute.ts";
+import type { PriceOverrides, Weighting } from "./pricing.ts";
+import { buildSubagentDrill, buildToolBreakdown } from "./attribute.ts";
 import { burnRateOverWindow, projectExhaustion } from "./blocks.ts";
 import { byHour, byModel, byProject, bySession } from "./aggregate.ts";
 import { costOf, weightedOf } from "./pricing.ts";
@@ -17,6 +18,32 @@ import { costOf, weightedOf } from "./pricing.ts";
 const MIN = 60_000;
 
 export type Since = "block" | "today" | "24h" | "7d" | "30d" | "all";
+
+/** ある時間範囲のレコード／ツールイベントから組み立てた各軸の内訳セット。 */
+export interface RangedBreakdowns {
+  byModel: BreakdownRow[];
+  bySession: BreakdownRow[];
+  byProject: BreakdownRow[];
+  byHour: BreakdownRow[];
+  tools: ToolBreakdownRow[];
+  drill: DrillNode[];
+}
+
+export function buildBreakdowns(
+  records: TurnRecord[],
+  toolEvents: ToolEvent[],
+  opts: { weighting?: Weighting; overrides?: PriceOverrides } = {},
+): RangedBreakdowns {
+  const subRecs = records.filter((r) => r.agentKind !== null);
+  return {
+    byModel: byModel(records, opts),
+    bySession: bySession(records, opts),
+    byProject: byProject(records, opts),
+    byHour: byHour(records, opts),
+    tools: buildToolBreakdown(toolEvents, subRecs),
+    drill: buildSubagentDrill(subRecs),
+  };
+}
 
 /** since 指定の開始時刻（epoch ms）。block/all は null（範囲制限なし or ブロック）。 */
 export function rangeStart(since: Since, now: number): number | null {
@@ -65,11 +92,8 @@ export interface Snapshot {
    */
   budgetBurnPerMin: number | null;
   projection: Projection | null;
-  byModel: BreakdownRow[];
-  bySession: BreakdownRow[];
-  byProject: BreakdownRow[];
-  byHour: BreakdownRow[];
-  tools: ToolBreakdownRow[];
+  /** 現在 5h ウィンドウの各軸内訳。watch / report block で render が再計算せずそのまま使う。 */
+  breakdowns: RangedBreakdowns;
   /** sessionId → 表示名（custom-title 優先、無ければ ai-title）。 */
   sessionTitles: Map<string, string>;
   /** ウィンドウ開始〜now を48分割したバケット毎の生トークン（スパークライン用）。 */
@@ -131,7 +155,10 @@ export function buildSnapshot(
 ): Snapshot {
   const windowMs = config.windowHours * 3600_000;
   const opts = { weighting: config.weighting, overrides: config.priceOverrides };
-  const officialFive = official?.fiveHour ?? null;
+  // 過去になった reset 値は API 失敗中の境界跨ぎで起き得るので無効化（近似モードに退避）。
+  // 値を信用すると windowStart が >5h 前、windowEnd < now になり projection が歪む。
+  const officialFive =
+    official?.fiveHour && official.fiveHour.resetsAt > now ? official.fiveHour : null;
 
   // ウィンドウ確定: 公式 reset があれば reset-5h、無ければ直近 5h（近似 reset は出さない）。
   const resetTs = officialFive?.resetsAt ?? null;
@@ -146,8 +173,13 @@ export function buildSnapshot(
 
   // limit/%/reset はすべて API のみに寄せる（取れなければ表示しない）。
   // effectiveLimit: API の utilization と現在消費から逆算。
+  // utilization の API 精度は概ね 1%。0.5% のような極小値ではウィンドウ序盤の単発ターンで
+  // 逆算 limit が桁違いに膨らみ projection / budgetBurnPerMin が誤誘導するため、閾値を設ける。
+  const MIN_UTILIZATION_FOR_LIMIT = 1.0;
   const effectiveLimit =
-    officialFive && officialFive.utilization > 0 && usedWeighted > 0
+    officialFive &&
+    officialFive.utilization >= MIN_UTILIZATION_FOR_LIMIT &&
+    usedWeighted > 0
       ? usedWeighted / (officialFive.utilization / 100)
       : null;
 
@@ -186,11 +218,8 @@ export function buildSnapshot(
   }
 
   // ツール帰属: ウィンドウ内の main toolEvents + ウィンドウ内 subagent records。
-  const evs = scan.toolEvents.filter(
-    (e) => e.ts === null || (e.ts >= windowStart && e.ts <= now),
-  );
-  const subRecs = recs.filter((r) => r.agentKind !== null);
-  const tools = buildToolBreakdown(evs, subRecs);
+  const evs = scan.toolEvents.filter((e) => e.ts >= windowStart && e.ts <= now);
+  const breakdowns = buildBreakdowns(recs, evs, opts);
 
   return {
     now,
@@ -207,11 +236,7 @@ export function buildSnapshot(
     burnHour,
     budgetBurnPerMin,
     projection,
-    byModel: byModel(recs, opts),
-    bySession: bySession(recs, opts),
-    byProject: byProject(recs, opts),
-    byHour: byHour(recs, opts),
-    tools,
+    breakdowns,
     sessionTitles: scan.sessionTitles,
     spark: sparkBuckets(recs, windowStart, now, 48),
     // バケット境界を絶対時刻（10秒粒度）に揃え、未完了バケットを含めないことで「ティックが進んでも形が変わらず、境界をまたいだ瞬間だけ左に1個ずれる」純粋な左スクロールを実現する。

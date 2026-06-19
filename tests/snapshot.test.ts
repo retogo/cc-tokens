@@ -35,21 +35,21 @@ describe("buildSnapshot（fixture 統合）", () => {
 
   test("ツール内訳: Workflow が実測、Read/Bash が推定", async () => {
     const s = await snap();
-    const wf = s.tools.find((t) => t.tool === "Workflow")!;
+    const wf = s.breakdowns.tools.find((t) => t.tool === "Workflow")!;
     // 実測 = (300+20+3000)+(350+400+100)
     expect(wf.tokens).toBe(300 + 20 + 3000 + (350 + 400 + 100));
     expect(wf.estimated).toBe(false);
-    const read = s.tools.find((t) => t.tool === "Read")!;
+    const read = s.breakdowns.tools.find((t) => t.tool === "Read")!;
     expect(read.tokens).toBe(10); // 40 字 / 4
     expect(read.estimated).toBe(true);
-    const bash = s.tools.find((t) => t.tool === "Bash")!;
+    const bash = s.breakdowns.tools.find((t) => t.tool === "Bash")!;
     expect(bash.tokens).toBe(2); // 8 字 / 4
   });
 
   test("モデル内訳: opus(4ターン) が sonnet(1) より上位", async () => {
     const s = await snap();
-    expect(s.byModel[0]!.key).toContain("opus");
-    expect(s.byModel.find((r) => r.key.includes("opus"))!.count).toBe(4);
+    expect(s.breakdowns.byModel[0]!.key).toContain("opus");
+    expect(s.breakdowns.byModel.find((r) => r.key.includes("opus"))!.count).toBe(4);
   });
 
   test("API が無ければ pct / effectiveLimit / resetTs はすべて null（使用量は出る）", async () => {
@@ -88,6 +88,31 @@ describe("API（/api/oauth/usage）統合", () => {
   test("API が無ければ使い切りペースは null", async () => {
     const s = await snap(null);
     expect(s.budgetBurnPerMin).toBeNull();
+  });
+
+  test("utilization が極小（<1.0%）のときは limit 逆算しない（早期ウィンドウの過大推定回避）", async () => {
+    // util=0.5%, reset 60分後 → 普通なら limit ≒ used/0.005 で過大値
+    const s = await snap(officialAt(0.5, 60));
+    expect(s.pct).toBe(0.005); // pct 自体は API 値を反映
+    expect(s.effectiveLimit).toBeNull(); // limit 逆算はスキップ
+    expect(s.budgetBurnPerMin).toBeNull();
+    expect(s.projection?.exhaustionTs ?? null).toBeNull();
+  });
+
+  test("utilization が閾値 (>=1.0%) を満たせば limit 逆算する", async () => {
+    const s = await snap(officialAt(1.0, 60));
+    expect(s.effectiveLimit).not.toBeNull();
+    expect(s.effectiveLimit!).toBeCloseTo(s.usedWeighted / 0.01, 6);
+  });
+
+  test("resetTs が過去（API 失敗中にリセット境界を跨いだ）なら近似モードに退避", async () => {
+    // reset が NOW より 1 分前 = 既に境界跨ぎ後
+    const stale = officialAt(50, -1);
+    const s = await snap(stale);
+    expect(s.resetTs).toBeNull(); // 過去 reset は出さない
+    expect(s.windowStart).toBe(NOW - 5 * 3600_000); // 近似モードへ
+    expect(s.effectiveLimit).toBeNull(); // limit 逆算もスキップ（API 信用しない）
+    expect(s.pct).toBeNull();
   });
 
   test("目標ペースが表示に出る", async () => {

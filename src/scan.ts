@@ -101,8 +101,14 @@ export class Scanner {
       if (!line) continue;
       const parsed = parseLineFull(line, path);
       if (parsed.record) acc.records.push(parsed.record);
-      // 直接ツール帰属はメインセッションのみ（サブは records 側で実測）
-      if (!isSub && (parsed.toolUses.length || parsed.toolResults.length)) {
+      // 直接ツール帰属はメインセッションのみ（サブは records 側で実測）。
+      // record 側が lineTs !== null を必須としているのに合わせ、timestamp 不在行は除外する
+      // （since ウィンドウ間で非対称に混入するのを防ぐ）。
+      if (
+        !isSub &&
+        parsed.lineTs !== null &&
+        (parsed.toolUses.length || parsed.toolResults.length)
+      ) {
         acc.toolEvents.push({
           uses: parsed.toolUses,
           results: parsed.toolResults,

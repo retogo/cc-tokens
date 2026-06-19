@@ -126,8 +126,8 @@ export function buildSubagentDrill(subRecords: TurnRecord[]): DrillNode[] {
 export interface ToolEvent {
   uses: ToolUseRef[];
   results: ToolResultRef[];
-  /** 行の timestamp（epoch ms）。時間窓フィルタ用。 */
-  ts: number | null;
+  /** 行の timestamp（epoch ms）。scan 側で必ず非 null の行のみ採用する。 */
+  ts: number;
 }
 
 interface Acc {

@@ -24,6 +24,20 @@ function merge(into: ScanResult, more: ScanResult): void {
   if (more.sessionTitles.size > 0) into.sessionTitles = more.sessionTitles;
 }
 
+/**
+ * 長時間 watch で state 配列が単調増加するのを抑える。
+ * 表示は 5h ウィンドウのみなので、2× ウィンドウより古い要素は捨ててもどの算出にも影響しない。
+ * （seed と同じ「直近 2 ウィンドウ」前提を rebuild 毎に維持する。）
+ */
+export function pruneState(state: ScanResult, cutoffMs: number): void {
+  if (state.records.length > 0 && state.records[0]!.ts < cutoffMs) {
+    state.records = state.records.filter((r) => r.ts >= cutoffMs);
+  }
+  if (state.toolEvents.length > 0 && state.toolEvents[0]!.ts < cutoffMs) {
+    state.toolEvents = state.toolEvents.filter((e) => e.ts >= cutoffMs);
+  }
+}
+
 export interface WatchOptions extends ReportOptions {
   intervalMs: number;
   /** 公式 usage を取得して % / reset を表示・自動キャリブレーションするか。 */
@@ -95,6 +109,19 @@ export async function watch(
         rebuild();
         return;
       }
+      if (s === "r") {
+        // r: API usage を即時再取得（401 などの一時エラー復旧後にユーザが明示的に促せる）。
+        if (opts.official && !refreshing) {
+          refreshing = true;
+          // backoff をリセットしてから fire-and-forget。完了で rebuild。
+          backoffMs = OFFICIAL_REFRESH_MS;
+          refreshOfficial().finally(() => {
+            refreshing = false;
+            rebuild();
+          });
+        }
+        return;
+      }
       // 以下はビューポート移動のみ。データは再計算せず paint() で切り出すだけ（着色が瞬く・値が動くのを防ぐ）。
       if (s === "\x1b[A" || s === "\x1bOA" || s === "k") {
         scroll -= 1; // ↑
@@ -124,6 +151,8 @@ export async function watch(
   let officialError: string | null = null;
   let nextOfficialAt = 0;
   let backoffMs = OFFICIAL_REFRESH_MS;
+  // 手動 refresh 中フラグ（多重押下で fetchOfficialUsage を並列起動しない）。
+  let refreshing = false;
   const refreshOfficial = async () => {
     if (!opts.official) return;
     try {
@@ -134,10 +163,15 @@ export async function watch(
     } catch (e) {
       // official（前回値）は残す。理由を表示し、次回までバックオフ。
       officialError = e instanceof Error ? e.message : String(e);
+      // 401（トークン期限切れ）は復旧がユーザ操作（claude 再起動）に依存するので backoff を伸ばさず、
+      // 短間隔で再試行することで再認証直後に古い表示を引きずらないようにする。
+      const is401 = e instanceof OfficialFetchError && e.status === 401;
       const retry =
         e instanceof OfficialFetchError && e.retryAfterMs ? e.retryAfterMs : backoffMs;
-      backoffMs = Math.min(backoffMs * 2, OFFICIAL_BACKOFF_MAX_MS);
-      nextOfficialAt = Date.now() + Math.max(retry, OFFICIAL_REFRESH_MS);
+      if (!is401) {
+        backoffMs = Math.min(backoffMs * 2, OFFICIAL_BACKOFF_MAX_MS);
+      }
+      nextOfficialAt = Date.now() + (is401 ? OFFICIAL_REFRESH_MS : Math.max(retry, OFFICIAL_REFRESH_MS));
     }
   };
   await refreshOfficial();
@@ -153,17 +187,15 @@ export async function watch(
   const rebuild = () => {
     const now = Date.now();
     lastUpdate = now;
+    // 2× ウィンドウより古い要素を捨て、長期稼働での state 配列の単調増加を抑える。
+    pruneState(state, now - 2 * config.windowHours * 3600_000);
     const snap = buildSnapshot(state, config, now, official);
-    const range = {
-      label: "current 5h window",
-      records: state.records.filter(
-        (r) => r.ts >= snap.windowStart && r.ts <= now,
-      ),
-      toolEvents: state.toolEvents.filter(
-        (e) => e.ts === null || (e.ts >= snap.windowStart && e.ts <= now),
-      ),
-    };
-    const body = renderReport(snap, range, { ...opts, ticker, expand, showSessionIds });
+    const body = renderReport(snap, snap.breakdowns, "current 5h window", {
+      ...opts,
+      ticker,
+      expand,
+      showSessionIds,
+    });
     let apiNote = "";
     if (opts.official && officialError) {
       if (official) {
@@ -192,8 +224,9 @@ export async function watch(
       lines.length > viewport
         ? `  [${scroll + 1}-${Math.min(scroll + viewport, lines.length)}/${lines.length} ↑↓]`
         : "";
+    const refreshHint = opts.official ? "  /  r: refresh API" : "";
     const footer = color.dim(
-      `Updated ${new Date(lastUpdate).toLocaleTimeString()}  /  every ${opts.intervalMs / 1000}s  /  Ctrl-O: expand  /  Ctrl-N: ${showSessionIds ? "name" : "id"}${pos}  /  q: quit`,
+      `Updated ${new Date(lastUpdate).toLocaleTimeString()}  /  every ${opts.intervalMs / 1000}s  /  Ctrl-O: expand  /  Ctrl-N: ${showSessionIds ? "name" : "id"}${refreshHint}${pos}  /  q: quit`,
     );
     process.stdout.write(REDRAW + visible.join("\n") + "\n" + footer);
   };

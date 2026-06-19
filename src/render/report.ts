@@ -1,9 +1,7 @@
-import type { BreakdownRow, TurnRecord } from "../types.ts";
-import type { DrillNode, ToolBreakdownRow, ToolEvent } from "../attribute.ts";
-import type { Snapshot } from "../snapshot.ts";
+import type { BreakdownRow } from "../types.ts";
+import type { DrillNode, ToolBreakdownRow } from "../attribute.ts";
+import type { RangedBreakdowns, Snapshot } from "../snapshot.ts";
 import type { OfficialUsage } from "../official.ts";
-import { buildSubagentDrill, buildToolBreakdown } from "../attribute.ts";
-import { byHour, byModel, byProject, bySession } from "../aggregate.ts";
 import {
   bar,
   color,
@@ -269,41 +267,31 @@ function renderTools(
   return lines.join("\n");
 }
 
-export interface RangeData {
-  label: string;
-  records: TurnRecord[];
-  toolEvents: ToolEvent[];
-}
-
-/** 単発レポート全体。 */
+/**
+ * 単発レポート全体。
+ * - watch / report block: snapshot.breakdowns（5h ウィンドウ）をそのまま表示
+ * - report --since 24h/7d/30d 等: 呼び出し側がその範囲の Breakdowns を計算して渡す
+ */
 export function renderReport(
   s: Snapshot,
-  range: RangeData,
+  breakdowns: RangedBreakdowns,
+  rangeLabel: string,
   opts: ReportOptions,
 ): string {
   const t = opts.ticker;
   const sections: string[] = [renderBlockStatus(s, t), ""];
 
-  sections.push(c.bold(`■ Breakdown (${range.label})`));
-  const subRecs = range.records.filter((r) => r.agentKind !== null);
+  sections.push(c.bold(`■ Breakdown (${rangeLabel})`));
 
   for (const axis of opts.axes) {
     switch (axis) {
-      case "tool": {
-        const drill = buildSubagentDrill(subRecs);
+      case "tool":
         sections.push(
-          renderTools(
-            buildToolBreakdown(range.toolEvents, subRecs),
-            opts.topN,
-            drill,
-            opts.expand ?? false,
-            t,
-          ),
+          renderTools(breakdowns.tools, opts.topN, breakdowns.drill, opts.expand ?? false, t),
         );
         break;
-      }
       case "model":
-        sections.push(renderBreakdown("By model", byModel(range.records), opts.topN, "model", t));
+        sections.push(renderBreakdown("By model", breakdowns.byModel, opts.topN, "model", t));
         break;
       case "session": {
         const titles = s.sessionTitles;
@@ -314,15 +302,17 @@ export function renderReport(
           return name ? shortTitle(name) : shortKey(key);
         };
         sections.push(
-          renderBreakdown("By session", bySession(range.records), opts.topN, "session", t, resolve),
+          renderBreakdown("By session", breakdowns.bySession, opts.topN, "session", t, resolve),
         );
         break;
       }
       case "project":
-        sections.push(renderBreakdown("By project", byProject(range.records), opts.topN, "project", t));
+        sections.push(
+          renderBreakdown("By project", breakdowns.byProject, opts.topN, "project", t),
+        );
         break;
       case "hour":
-        sections.push(renderBreakdown("By hour", byHour(range.records), opts.topN, "hour", t));
+        sections.push(renderBreakdown("By hour", breakdowns.byHour, opts.topN, "hour", t));
         break;
     }
   }
