@@ -4,15 +4,19 @@ import type { BurnRate, Projection, TurnRecord } from "./types.ts";
 
 export const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
 
+// 呼び出し側が指定しない場合に使う既定。config.ts DEFAULTS.weighting と一致させる。
+const RAW: Weighting = { mode: "raw" };
+
 function weightedSum(
   records: TurnRecord[],
   weighting: Weighting | undefined,
   overrides: PriceOverrides | undefined,
 ): { weighted: number; raw: number } {
+  const w = weighting ?? RAW;
   let weighted = 0;
   let raw = 0;
   for (const r of records) {
-    weighted += weightedOf(r.usage, r.model, weighting, overrides);
+    weighted += weightedOf(r.usage, r.model, w, overrides);
     raw += r.usage.input + r.usage.output + r.usage.cacheCreation;
   }
   return { weighted, raw };

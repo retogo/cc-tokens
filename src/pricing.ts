@@ -60,19 +60,19 @@ export function costOf(usage: TokenUsage, model: string, overrides?: PriceOverri
   );
 }
 
-/** 加重指標の定義。cost = コスト換算（既定）、raw = 生トークン（cache_read 除外）。 */
+/** 加重指標の定義。cost = コスト換算、raw = 生トークン（既定で cache_read 除外）。 */
 export type Weighting = { mode: "cost" } | { mode: "raw"; includeCacheRead?: boolean };
-
-const DEFAULT_WEIGHTING: Weighting = { mode: "cost" };
 
 /**
  * limit ゲージ・バーンレートに使う単一スカラー指標。
  * cost: costOf（ドル）。raw: 生トークン合計（既定で cache_read 除外）。
+ * 既定は呼び出し側（Config 経由）に委ねる。引数既定値は持たない
+ * （Config の DEFAULTS.weighting と pricing 側の暗黙既定値が乖離するのを避ける）。
  */
 export function weightedOf(
   usage: TokenUsage,
   model: string,
-  weighting: Weighting = DEFAULT_WEIGHTING,
+  weighting: Weighting,
   overrides?: PriceOverrides,
 ): number {
   if (weighting.mode === "raw") {

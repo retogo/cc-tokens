@@ -28,19 +28,17 @@ function merge(into: ScanResult, more: ScanResult): void {
 /**
  * 長時間 watch で state 配列が単調増加するのを抑える。
  * 表示は 5h ウィンドウのみなので、2× ウィンドウより古い要素は捨ててもどの算出にも影響しない。
- * （seed と同じ「直近 2 ウィンドウ」前提を rebuild 毎に維持する。）
+ * scan.poll() は複数ファイルから append するため ts 単調増加は保証されず、
+ * 頭だけ見て早期 return すると後続に潜む古い要素が永続滞留する。空配列のみスキップする。
  */
 export function pruneState(state: ScanResult, cutoffMs: number): void {
-  const head = state.records[0];
-  if (head && head.ts < cutoffMs) {
+  if (state.records.length > 0) {
     state.records = state.records.filter((r) => r.ts >= cutoffMs);
   }
-  const headTool = state.toolEvents[0];
-  if (headTool && headTool.ts < cutoffMs) {
+  if (state.toolEvents.length > 0) {
     state.toolEvents = state.toolEvents.filter((e) => e.ts >= cutoffMs);
   }
-  const headSubTool = state.subagentToolEvents[0];
-  if (headSubTool && headSubTool.ts < cutoffMs) {
+  if (state.subagentToolEvents.length > 0) {
     state.subagentToolEvents = state.subagentToolEvents.filter((e) => e.ts >= cutoffMs);
   }
 }

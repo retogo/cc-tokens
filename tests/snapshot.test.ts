@@ -90,6 +90,23 @@ describe("API（/api/oauth/usage）統合", () => {
     expect(s.budgetBurnPerMin).toBeNull();
   });
 
+  test("effectiveLimit と budgetBurnPerMin は raw token 単位（cost mode でも tok ラベルと整合）", async () => {
+    // cost weighting で snapshot を作っても、limit/target は usedRaw 基準で算出される。
+    const sc = new Scanner(FIX);
+    const scan = await sc.seed();
+    const costConfig = { ...DEFAULTS, weighting: { mode: "cost" as const } };
+    const official = parseOfficialUsage(
+      { five_hour: { utilization: 50, resets_at: "2026-06-18T02:00:00Z" } },
+      NOW,
+    );
+    const s = buildSnapshot(scan, costConfig, NOW, official);
+    const usedRaw = s.totals.input + s.totals.output + s.totals.cacheCreation;
+    expect(s.effectiveLimit).toBeCloseTo(usedRaw / 0.5, 6);
+    // Target は usedRaw 基準（cost で評価しない）
+    const minutesToReset = (s.resetTs! - NOW) / 60_000;
+    expect(s.budgetBurnPerMin).toBeCloseTo((s.effectiveLimit! - usedRaw) / minutesToReset, 6);
+  });
+
   test("utilization が極小（<1.0%）のときは limit 逆算しない（早期ウィンドウの過大推定回避）", async () => {
     // util=0.5%, reset 60分後 → 普通なら limit ≒ used/0.005 で過大値
     const s = await snap(officialAt(0.5, 60));

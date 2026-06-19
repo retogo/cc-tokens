@@ -1,5 +1,5 @@
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { claudeConfigDir } from "./paths.ts";
 
 /**
  * Claude Code の `/usage` が叩く公式エンドポイント。
@@ -100,7 +100,7 @@ export async function getOAuthToken(): Promise<string | null> {
   }
   // 2) credentials.json
   try {
-    const file = Bun.file(join(homedir(), ".claude", ".credentials.json"));
+    const file = Bun.file(join(claudeConfigDir(), ".credentials.json"));
     if (await file.exists()) {
       const token = tokenFromJson(await file.text());
       if (token) return token;

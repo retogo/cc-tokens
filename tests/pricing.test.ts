@@ -33,12 +33,20 @@ describe("pricing (テスト4)", () => {
     expect(priceFor("totally-unknown-model").input).toBeGreaterThan(0);
   });
 
-  test("weightedOf 既定(cost) は costOf と一致", () => {
-    expect(weightedOf(u, "claude-opus-4-8")).toBeCloseTo(costOf(u, "claude-opus-4-8"), 10);
+  test("weightedOf cost は costOf と一致", () => {
+    expect(weightedOf(u, "claude-opus-4-8", { mode: "cost" })).toBeCloseTo(
+      costOf(u, "claude-opus-4-8"),
+      10,
+    );
   });
 
   test("weightedOf raw は cache_read を除いた生トークン合計", () => {
     const w = weightedOf(u, "claude-opus-4-8", { mode: "raw" });
     expect(w).toBe(1000 + 50 + 2000); // cacheRead 除外
+  });
+
+  test("weightedOf raw + includeCacheRead は cacheRead も含む", () => {
+    const w = weightedOf(u, "claude-opus-4-8", { mode: "raw", includeCacheRead: true });
+    expect(w).toBe(1000 + 50 + 2000 + 10000);
   });
 });

@@ -1,6 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseOfficialUsage } from "../src/official.ts";
+import { getOAuthToken, parseOfficialUsage } from "../src/official.ts";
 
 const raw = await Bun.file(join(import.meta.dir, "..", "fixtures", "official-usage.json")).json();
 const FETCHED = Date.parse("2026-06-18T03:30:00.000Z");
@@ -35,5 +37,32 @@ describe("parseOfficialUsage（実レスポンス）", () => {
     expect(empty.fiveHour).toBeNull();
     expect(empty.sevenDay).toBeNull();
     expect(empty.limits).toEqual([]);
+  });
+});
+
+describe("getOAuthToken は CLAUDE_CONFIG_DIR を尊重する", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cctok-cred-"));
+  const origEnv = process.env.CLAUDE_CONFIG_DIR;
+  const origPlatform = process.platform;
+
+  beforeAll(async () => {
+    // macOS の Keychain 経路を踏まないよう platform を上書きする（読み取り経路のみ検証）。
+    Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+    process.env.CLAUDE_CONFIG_DIR = dir;
+    await Bun.write(
+      join(dir, ".credentials.json"),
+      JSON.stringify({ claudeAiOauth: { accessToken: "from-overridden-dir" } }),
+    );
+  });
+
+  afterAll(() => {
+    if (origEnv === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = origEnv;
+    Object.defineProperty(process, "platform", { value: origPlatform, configurable: true });
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("CLAUDE_CONFIG_DIR 配下の .credentials.json を読む", async () => {
+    expect(await getOAuthToken()).toBe("from-overridden-dir");
   });
 });

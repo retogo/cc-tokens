@@ -7,6 +7,9 @@ export interface AggregateOptions {
   overrides?: PriceOverrides;
 }
 
+// 呼び出し側が指定しない場合に使う既定。config.ts DEFAULTS.weighting と一致させる。
+const RAW: Weighting = { mode: "raw" };
+
 function emptyUsage(): TokenUsage {
   return { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
 }
@@ -41,7 +44,7 @@ export function groupBy(
     acc.usage.output += r.usage.output;
     acc.usage.cacheCreation += r.usage.cacheCreation;
     acc.usage.cacheRead += r.usage.cacheRead;
-    const w = weightedOf(r.usage, r.model, opts.weighting, opts.overrides);
+    const w = weightedOf(r.usage, r.model, opts.weighting ?? RAW, opts.overrides);
     acc.weighted += w;
     acc.cost += costOf(r.usage, r.model, opts.overrides);
     acc.count += 1;

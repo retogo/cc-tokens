@@ -67,6 +67,32 @@ describe("パス由来の種別とフォールバック (テスト3)", () => {
   });
 });
 
+describe("agentId はパス由来のみ（main 行の obj.agentId はフォールバックに使わない）", () => {
+  test("メイン行の obj.agentId は無視して agentId は null（agentKind=null の契約を守る）", () => {
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        model: "claude-opus-4-8",
+        role: "assistant",
+        content: [],
+        usage: {
+          input_tokens: 1,
+          output_tokens: 0,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        },
+      },
+      timestamp: "2026-06-18T00:00:10.000Z",
+      sessionId: "s",
+      cwd: "/p",
+      agentId: "spoofed",
+    });
+    const r = parseLine(line, MAIN_PATH);
+    expect(r!.agentKind).toBeNull();
+    expect(r!.agentId).toBeNull();
+  });
+});
+
 describe("セッションタイトル行の抽出 (ai-title / custom-title)", () => {
   test("ai-title は kind=ai で sessionId/title を返す", () => {
     const line = JSON.stringify({
@@ -96,6 +122,52 @@ describe("セッションタイトル行の抽出 (ai-title / custom-title)", ()
 
   test("非タイトル行は title=null", () => {
     expect(parseLineFull(assistantLine, MAIN_PATH).title).toBeNull();
+  });
+});
+
+describe("tool_use / tool_result の id 欠落は採用しない（誤帰属を防ぐ）", () => {
+  test("id 欠落の tool_use は toolUses から除外する", () => {
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        model: "claude-opus-4-8",
+        role: "assistant",
+        content: [
+          { type: "tool_use", name: "Read", input: {} }, // id 欠落
+          { type: "tool_use", id: "tu_1", name: "Bash", input: {} },
+        ],
+        usage: {
+          input_tokens: 1,
+          output_tokens: 0,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        },
+      },
+      timestamp: "2026-06-18T00:00:10.000Z",
+      sessionId: "s",
+      cwd: "/p",
+    });
+    const p = parseLineFull(line, MAIN_PATH);
+    expect(p.toolUses).toEqual([{ id: "tu_1", name: "Bash" }]);
+    // record.toolsInvoked は名前ベースなので id 欠落でも残す（帰属には影響しない）
+    expect(p.record!.toolsInvoked).toEqual(["Read", "Bash"]);
+  });
+
+  test("tool_use_id 欠落の tool_result は toolResults から除外する", () => {
+    const line = JSON.stringify({
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          { type: "tool_result", content: "abc" }, // tool_use_id 欠落
+          { type: "tool_result", tool_use_id: "tu_1", content: "def" },
+        ],
+      },
+      timestamp: "2026-06-18T00:00:10.000Z",
+      sessionId: "s",
+    });
+    const p = parseLineFull(line, MAIN_PATH);
+    expect(p.toolResults).toEqual([{ toolUseId: "tu_1", chars: 3 }]);
   });
 });
 

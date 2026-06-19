@@ -52,14 +52,40 @@ function parseAxes(v: string | undefined, fallback: ByAxis[]): ByAxis[] {
     .filter((s): s is ByAxis => valid.has(s));
 }
 
-/** 数値フラグを検証。非数値や非正数は警告を出して undefined（呼び出し側で既定にフォールバック）。 */
-function parsePositiveNumber(
-  raw: string | undefined,
-  flag: string,
-  parser: (s: string) => number,
-): number | undefined {
+const SINCE_VALUES: ReadonlySet<Since> = new Set(["block", "today", "24h", "7d", "30d", "all"]);
+
+/** --since の値を検証。未知値は警告して既定 (block) に戻す（不明な文字列を素通しすると無音で全期間集計になる）。 */
+export function parseSince(raw: string | undefined): Since {
+  if (raw === undefined) return "block";
+  if (SINCE_VALUES.has(raw as Since)) return raw as Since;
+  process.stderr.write(
+    `Invalid --since: ${raw} (must be block|today|24h|7d|30d|all; using default 'block')\n`,
+  );
+  return "block";
+}
+
+/**
+ * 数値フラグを検証。`parseInt` / `parseFloat` の寛容パース（`5abc` → 5 等）を避け、
+ * 正規表現でフォーマットを厳格チェックしてから Number() で変換する。
+ * 非数値・部分パース・非正数は警告を出して undefined（呼び出し側で既定にフォールバック）。
+ */
+export function parsePositiveInt(raw: string | undefined, flag: string): number | undefined {
   if (raw === undefined) return undefined;
-  const n = parser(raw);
+  if (!/^\d+$/.test(raw) || !(Number(raw) > 0)) {
+    process.stderr.write(`Invalid --${flag}: ${raw} (must be a positive integer; using default)\n`);
+    return undefined;
+  }
+  return Number(raw);
+}
+
+export function parsePositiveFloat(raw: string | undefined, flag: string): number | undefined {
+  if (raw === undefined) return undefined;
+  // 5 / 5.0 / 0.5 / .5 を許容。末尾ゴミは弾く。
+  if (!/^(\d+\.?\d*|\.\d+)$/.test(raw)) {
+    process.stderr.write(`Invalid --${flag}: ${raw} (must be a positive number; using default)\n`);
+    return undefined;
+  }
+  const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) {
     process.stderr.write(`Invalid --${flag}: ${raw} (must be a positive number; using default)\n`);
     return undefined;
@@ -91,7 +117,7 @@ async function main() {
 
   const root = values.root || claudeProjectsDir();
   const config = await loadConfig();
-  const topN = parsePositiveNumber(values.top, "top", (s) => parseInt(s, 10));
+  const topN = parsePositiveInt(values.top, "top");
 
   if (cmd === "usage") {
     const now = Date.now();
@@ -107,7 +133,7 @@ async function main() {
   }
 
   if (cmd === "watch") {
-    const intervalSec = parsePositiveNumber(values.interval, "interval", parseFloat);
+    const intervalSec = parsePositiveFloat(values.interval, "interval");
     const intervalMs = (intervalSec ?? config.intervalSec) * 1000;
     await watch(root, config, {
       intervalMs,
@@ -121,7 +147,7 @@ async function main() {
 
   if (cmd === "report") {
     const now = Date.now();
-    const since = (values.since as Since) || "block";
+    const since = parseSince(values.since);
     const scanner = new Scanner(root);
     const from = rangeStart(since, now);
     const scan = await scanner.seed(from ?? undefined);

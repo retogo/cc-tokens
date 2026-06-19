@@ -111,13 +111,19 @@ export function parseLineFull(line: string, filePath: string): ParsedLine {
 
   const toolUses: ToolUseRef[] = [];
   const toolResults: ToolResultRef[] = [];
+  const toolNames: string[] = [];
   for (const block of content) {
     if (!isRecord(block)) continue;
     if (block.type === "tool_use" && typeof block.name === "string") {
-      toolUses.push({ id: String(block.id ?? ""), name: block.name });
-    } else if (block.type === "tool_result") {
+      toolNames.push(block.name);
+      // id が欠落した tool_use は id↔name 対応に乗せない（空文字キーで保持すると idToName の
+      // 上書きが起きて全 tool_result が直近の空 id 名へ誤帰属する）。toolsInvoked への計上は別途行う。
+      if (typeof block.id === "string") {
+        toolUses.push({ id: block.id, name: block.name });
+      }
+    } else if (block.type === "tool_result" && typeof block.tool_use_id === "string") {
       toolResults.push({
-        toolUseId: String(block.tool_use_id ?? ""),
+        toolUseId: block.tool_use_id,
         chars: resultChars(block.content),
       });
     }
@@ -140,11 +146,11 @@ export function parseLineFull(line: string, filePath: string): ParsedLine {
         cacheCreation: num(usage.cache_creation_input_tokens),
         cacheRead: num(usage.cache_read_input_tokens),
       },
-      toolsInvoked: toolUses.map((t) => t.name),
+      toolsInvoked: toolNames,
       isSidechain: obj.isSidechain === true || agentKind !== null,
       agentKind,
       workflowId: ids.workflowId,
-      agentId: ids.agentId ?? (typeof obj.agentId === "string" ? `agent-${obj.agentId}` : null),
+      agentId: ids.agentId,
       requestId: typeof obj.requestId === "string" ? obj.requestId : null,
     };
   }

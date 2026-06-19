@@ -81,8 +81,9 @@ export interface Snapshot {
   burn10: BurnRate;
   burnHour: BurnRate;
   /**
-   * リセットまでに残り（effectiveLimit-used）をちょうど使い切るバーンレート（加重/分）。
+   * リセットまでに残り（effectiveLimit-used）をちょうど使い切るバーンレート（raw token/分）。
    * これを超えると reset 前に枯渇、下回れば余裕。limit か reset が無ければ null。
+   * Burn 行と同じ raw 単位なので、weighting.mode に関係なく "tok/min" ラベルと整合する。
    */
   budgetBurnPerMin: number | null;
   projection: Projection | null;
@@ -98,7 +99,7 @@ export interface Snapshot {
   official: OfficialUsage | null;
   /** 真のリセット時刻（API のみ。無ければ null）。 */
   resetTs: number | null;
-  /** 予測に使う limit（API の utilization と現在消費から逆算。取得できなければ null）。 */
+  /** 予測に使う limit（API の utilization と現在消費(raw)から逆算。取得できなければ null）。 */
   effectiveLimit: number | null;
 }
 
@@ -154,23 +155,6 @@ export function buildSnapshot(
   const windowEnd = resetTs ?? windowStart + windowMs;
 
   const recs = scan.records.filter((r) => r.ts >= windowStart && r.ts <= now);
-  const usedWeighted = recs.reduce(
-    (s, r) => s + weightedOf(r.usage, r.model, config.weighting, config.priceOverrides),
-    0,
-  );
-
-  // limit/%/reset はすべて API のみに寄せる（取れなければ表示しない）。
-  // effectiveLimit: API の utilization と現在消費から逆算。
-  // utilization の API 精度は概ね 1%。0.5% のような極小値ではウィンドウ序盤の単発ターンで
-  // 逆算 limit が桁違いに膨らみ projection / budgetBurnPerMin が誤誘導するため、閾値を設ける。
-  const MIN_UTILIZATION_FOR_LIMIT = 1.0;
-  const effectiveLimit =
-    officialFive && officialFive.utilization >= MIN_UTILIZATION_FOR_LIMIT && usedWeighted > 0
-      ? usedWeighted / (officialFive.utilization / 100)
-      : null;
-
-  // pct: API の utilization のみ。
-  const pct = officialFive ? officialFive.utilization / 100 : null;
 
   const totals = recs.reduce((acc, r) => {
     acc.input += r.usage.input;
@@ -179,6 +163,26 @@ export function buildSnapshot(
     acc.cacheRead += r.usage.cacheRead;
     return acc;
   }, emptyTotals());
+  // limit / target / projection は raw token 単位で揃え、Used・Burn・Target の表示ラベル "tok" と整合させる。
+  const usedRaw = totals.input + totals.output + totals.cacheCreation;
+  // usedWeighted は内訳の重み付け参照のために残す（limit/target には使わない）。
+  const usedWeighted = recs.reduce(
+    (s, r) => s + weightedOf(r.usage, r.model, config.weighting, config.priceOverrides),
+    0,
+  );
+
+  // limit/%/reset はすべて API のみに寄せる（取れなければ表示しない）。
+  // effectiveLimit: API の utilization と現在消費(raw)から逆算。
+  // utilization の API 精度は概ね 1%。0.5% のような極小値ではウィンドウ序盤の単発ターンで
+  // 逆算 limit が桁違いに膨らみ projection / budgetBurnPerMin が誤誘導するため、閾値を設ける。
+  const MIN_UTILIZATION_FOR_LIMIT = 1.0;
+  const effectiveLimit =
+    officialFive && officialFive.utilization >= MIN_UTILIZATION_FOR_LIMIT && usedRaw > 0
+      ? usedRaw / (officialFive.utilization / 100)
+      : null;
+
+  // pct: API の utilization のみ。
+  const pct = officialFive ? officialFive.utilization / 100 : null;
 
   const burnWindow = burnRateOverWindow(
     recs,
@@ -190,18 +194,18 @@ export function buildSnapshot(
   const burn10 = burnRateOverWindow(recs, 10 * MIN, now, config.weighting, config.priceOverrides);
   const burnHour = burnRateOverWindow(recs, 60 * MIN, now, config.weighting, config.priceOverrides);
 
-  // 枯渇予測は直近(10分)バーンを優先、無ければウィンドウ平均。
-  const burnForProj = burn10.weightedPerMin > 0 ? burn10.weightedPerMin : burnWindow.weightedPerMin;
+  // 枯渇予測は直近(10分)バーンを優先、無ければウィンドウ平均（いずれも raw token/分）。
+  const burnForProj = burn10.rawPerMin > 0 ? burn10.rawPerMin : burnWindow.rawPerMin;
   const projection =
     recs.length > 0
-      ? projectExhaustion(usedWeighted, effectiveLimit, burnForProj, now, windowEnd)
+      ? projectExhaustion(usedRaw, effectiveLimit, burnForProj, now, windowEnd)
       : null;
 
-  // リセットまでに残りをちょうど使い切るペース（reset 時刻と limit が必要）。
+  // リセットまでに残りをちょうど使い切るペース（reset 時刻と limit が必要）。raw token/分。
   // remaining が実質0なら非表示（既に100%到達している状態では無意味）。
   let budgetBurnPerMin: number | null = null;
   if (effectiveLimit !== null && resetTs !== null && resetTs > now) {
-    const remaining = Math.max(effectiveLimit - usedWeighted, 0);
+    const remaining = Math.max(effectiveLimit - usedRaw, 0);
     // remaining が 1% 未満なら「使い切りペース」は表示しない
     if (remaining > effectiveLimit * 0.01) {
       budgetBurnPerMin = remaining / ((resetTs - now) / MIN);
