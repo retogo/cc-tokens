@@ -1,0 +1,23 @@
+{
+  "name": "cc-tokens",
+  "version": "0.1.0",
+  "description": "Live CLI for Claude Code 5h token usage — burn rate, exhaustion ETA, and per-tool/session/workflow breakdown",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/retogo/cc-tokens.git"
+  },
+  "bin": {
+    "cctok": "./src/cli.ts"
+  },
+  "scripts": {
+    "cctok": "bun run src/cli.ts",
+    "test": "bun test",
+    "typecheck": "bun run tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  }
+}

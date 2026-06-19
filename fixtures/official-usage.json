@@ -1,0 +1,61 @@
+{
+  "five_hour": {
+    "utilization": 50.0,
+    "resets_at": "2026-06-18T08:30:00.684728+00:00"
+  },
+  "seven_day": {
+    "utilization": 45.0,
+    "resets_at": "2026-06-23T11:00:00.684748+00:00"
+  },
+  "seven_day_oauth_apps": null,
+  "seven_day_opus": null,
+  "seven_day_sonnet": {
+    "utilization": 2.0,
+    "resets_at": "2026-06-23T10:59:59.684754+00:00"
+  },
+  "extra_usage": {
+    "is_enabled": false,
+    "monthly_limit": null,
+    "used_credits": null,
+    "utilization": null
+  },
+  "limits": [
+    {
+      "kind": "session",
+      "group": "session",
+      "percent": 50,
+      "severity": "normal",
+      "resets_at": "2026-06-18T08:30:00.684728+00:00",
+      "scope": null,
+      "is_active": true
+    },
+    {
+      "kind": "weekly_all",
+      "group": "weekly",
+      "percent": 45,
+      "severity": "normal",
+      "resets_at": "2026-06-23T11:00:00.684748+00:00",
+      "scope": null,
+      "is_active": false
+    },
+    {
+      "kind": "weekly_scoped",
+      "group": "weekly",
+      "percent": 2,
+      "severity": "normal",
+      "resets_at": "2026-06-23T10:59:59.684754+00:00",
+      "scope": {
+        "model": { "id": null, "display_name": "Sonnet" },
+        "surface": null
+      },
+      "is_active": false
+    }
+  ],
+  "spend": {
+    "used": { "amount_minor": 0, "currency": "USD", "exponent": 2 },
+    "limit": null,
+    "percent": 0,
+    "severity": "normal",
+    "enabled": false
+  }
+}
