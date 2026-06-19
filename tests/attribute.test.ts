@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { buildSubagentDrill, buildToolBreakdown, estTokens } from "../src/attribute.ts";
+import type { SubagentToolEvent } from "../src/attribute.ts";
+import {
+  buildAgentToolEstimates,
+  buildSubagentDrill,
+  buildToolBreakdown,
+  estTokens,
+} from "../src/attribute.ts";
 import type { ToolResultRef, ToolUseRef } from "../src/parse.ts";
 import type { TokenUsage, TurnRecord } from "../src/types.ts";
 
@@ -104,6 +110,67 @@ describe("直接ツールの推定帰属 (テスト9)", () => {
     const events = [ev([{ id: "t1", name: "Task" }]), ev([], [{ toolUseId: "t1", chars: 4000 }])];
     const rows = buildToolBreakdown(events, []);
     expect(rows.find((r) => r.tool === "Task")).toBeUndefined();
+  });
+});
+
+describe("buildAgentToolEstimates（agent 別の内部ツール推定）", () => {
+  function subEv(
+    agentId: string,
+    uses: ToolUseRef[],
+    results: ToolResultRef[] = [],
+    kind: "task" | "workflow" = "task",
+    workflowId: string | null = null,
+  ): SubagentToolEvent {
+    return { uses, results, ts: 0, agentKind: kind, agentId, workflowId };
+  }
+
+  test("agentId ごとに tool_use.id↔tool_result を結んで集計", () => {
+    const events = [
+      subEv("agent-1", [{ id: "u1", name: "Read" }]),
+      subEv("agent-1", [], [{ toolUseId: "u1", chars: 40 }]),
+      subEv("agent-1", [{ id: "u2", name: "Bash" }]),
+      subEv("agent-1", [], [{ toolUseId: "u2", chars: 80 }]),
+      subEv("agent-2", [{ id: "u3", name: "Read" }]),
+      subEv("agent-2", [], [{ toolUseId: "u3", chars: 200 }]),
+    ];
+    const map = buildAgentToolEstimates(events);
+    const a1 = map.get("agent-1")!;
+    const a2 = map.get("agent-2")!;
+    expect(a1.find((r) => r.tool === "Read")!.tokens).toBe(estTokens(40));
+    expect(a1.find((r) => r.tool === "Bash")!.tokens).toBe(estTokens(80));
+    expect(a1.find((r) => r.tool === "Read")!.calls).toBe(1);
+    expect(a2.find((r) => r.tool === "Read")!.tokens).toBe(estTokens(200));
+    // 各 agent 内で tokens 降順にソートされている。
+    expect(a1[0]!.tokens).toBeGreaterThanOrEqual(a1[a1.length - 1]!.tokens);
+  });
+
+  test("サブエージェント内で Task/Agent を呼んだ場合は除外（二重計上回避）", () => {
+    const events = [
+      subEv("agent-1", [{ id: "t1", name: "Task" }]),
+      subEv("agent-1", [], [{ toolUseId: "t1", chars: 4000 }]),
+    ];
+    const map = buildAgentToolEstimates(events);
+    expect(map.get("agent-1")).toBeUndefined();
+  });
+
+  test("buildSubagentDrill が agent 葉ノードに tools をぶら下げる", () => {
+    const u = (n: number): TokenUsage => ({
+      input: n,
+      output: 0,
+      cacheCreation: 0,
+      cacheRead: 0,
+    });
+    const subs = [subRec(u(100), "task", null, "agent-9")];
+    const events = [
+      subEv("agent-9", [{ id: "u1", name: "Edit" }]),
+      subEv("agent-9", [], [{ toolUseId: "u1", chars: 120 }]),
+    ];
+    const tree = buildSubagentDrill(subs, buildAgentToolEstimates(events));
+    const agentNode = tree
+      .find((n) => n.key === "Agent")!
+      .children.find((a) => a.key === "agent-9")!;
+    expect(agentNode.tools?.[0]?.tool).toBe("Edit");
+    expect(agentNode.tools?.[0]?.tokens).toBe(estTokens(120));
   });
 });
 

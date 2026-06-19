@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
-import type { ToolEvent } from "./attribute.ts";
-import { agentKindFromPath, parseLineFull } from "./parse.ts";
+import type { SubagentToolEvent, ToolEvent } from "./attribute.ts";
+import { agentKindFromPath, parseLineFull, subagentIdsFromPath } from "./parse.ts";
 import type { TurnRecord } from "./types.ts";
 
 export interface ScanResult {
@@ -8,6 +8,8 @@ export interface ScanResult {
   records: TurnRecord[];
   /** メインセッションファイル由来のツール I/O のみ（直接ツール帰属用）。 */
   toolEvents: ToolEvent[];
+  /** サブエージェントファイル由来のツール I/O。agent 単位のツール推定に使う。 */
+  subagentToolEvents: SubagentToolEvent[];
   /** sessionId → 表示名（custom-title 優先、無ければ ai-title）。 */
   sessionTitles: Map<string, string>;
 }
@@ -96,24 +98,36 @@ export class Scanner {
     const consumed = text.slice(0, nl + 1);
     this.offsets.set(path, offset + Buffer.byteLength(consumed, "utf8"));
 
-    const isSub = agentKindFromPath(path) !== null;
+    const agentKind = agentKindFromPath(path);
+    const isSub = agentKind !== null;
+    // サブエージェント側はファイル単位で agentId / workflowId が決まる。
+    const subIds = isSub ? subagentIdsFromPath(path) : null;
     for (const line of consumed.split("\n")) {
       if (!line) continue;
       const parsed = parseLineFull(line, path);
       if (parsed.record) acc.records.push(parsed.record);
       // 直接ツール帰属はメインセッションのみ（サブは records 側で実測）。
+      // サブエージェント由来は agent 単位のツール推定用に subagentToolEvents へ分けて保持。
       // record 側が lineTs !== null を必須としているのに合わせ、timestamp 不在行は除外する
       // （since ウィンドウ間で非対称に混入するのを防ぐ）。
-      if (
-        !isSub &&
-        parsed.lineTs !== null &&
-        (parsed.toolUses.length || parsed.toolResults.length)
-      ) {
-        acc.toolEvents.push({
-          uses: parsed.toolUses,
-          results: parsed.toolResults,
-          ts: parsed.lineTs,
-        });
+      const hasToolIO = parsed.toolUses.length > 0 || parsed.toolResults.length > 0;
+      if (parsed.lineTs !== null && hasToolIO) {
+        if (!isSub) {
+          acc.toolEvents.push({
+            uses: parsed.toolUses,
+            results: parsed.toolResults,
+            ts: parsed.lineTs,
+          });
+        } else if (agentKind && subIds?.agentId) {
+          acc.subagentToolEvents.push({
+            uses: parsed.toolUses,
+            results: parsed.toolResults,
+            ts: parsed.lineTs,
+            agentKind,
+            agentId: subIds.agentId,
+            workflowId: subIds.workflowId,
+          });
+        }
       }
       if (parsed.title) {
         const cur = this.titles.get(parsed.title.sessionId) ?? {};
@@ -137,5 +151,5 @@ export class Scanner {
 }
 
 function empty(): ScanResult {
-  return { records: [], toolEvents: [], sessionTitles: new Map() };
+  return { records: [], toolEvents: [], subagentToolEvents: [], sessionTitles: new Map() };
 }

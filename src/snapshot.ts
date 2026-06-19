@@ -1,6 +1,6 @@
 import { byHour, byModel, byProject, bySession } from "./aggregate.ts";
-import type { DrillNode, ToolBreakdownRow, ToolEvent } from "./attribute.ts";
-import { buildSubagentDrill, buildToolBreakdown } from "./attribute.ts";
+import type { DrillNode, SubagentToolEvent, ToolBreakdownRow, ToolEvent } from "./attribute.ts";
+import { buildAgentToolEstimates, buildSubagentDrill, buildToolBreakdown } from "./attribute.ts";
 import { burnRateOverWindow, projectExhaustion } from "./blocks.ts";
 import type { Config } from "./config.ts";
 import type { OfficialUsage } from "./official.ts";
@@ -26,16 +26,18 @@ export interface RangedBreakdowns {
 export function buildBreakdowns(
   records: TurnRecord[],
   toolEvents: ToolEvent[],
+  subagentToolEvents: SubagentToolEvent[],
   opts: { weighting?: Weighting; overrides?: PriceOverrides } = {},
 ): RangedBreakdowns {
   const subRecs = records.filter((r) => r.agentKind !== null);
+  const agentToolEstimates = buildAgentToolEstimates(subagentToolEvents);
   return {
     byModel: byModel(records, opts),
     bySession: bySession(records, opts),
     byProject: byProject(records, opts),
     byHour: byHour(records, opts),
     tools: buildToolBreakdown(toolEvents, subRecs),
-    drill: buildSubagentDrill(subRecs),
+    drill: buildSubagentDrill(subRecs, agentToolEstimates),
   };
 }
 
@@ -206,9 +208,10 @@ export function buildSnapshot(
     }
   }
 
-  // ツール帰属: ウィンドウ内の main toolEvents + ウィンドウ内 subagent records。
+  // ツール帰属: ウィンドウ内の main toolEvents + subagent tool events + ウィンドウ内 subagent records。
   const evs = scan.toolEvents.filter((e) => e.ts >= windowStart && e.ts <= now);
-  const breakdowns = buildBreakdowns(recs, evs, opts);
+  const subEvs = scan.subagentToolEvents.filter((e) => e.ts >= windowStart && e.ts <= now);
+  const breakdowns = buildBreakdowns(recs, evs, subEvs, opts);
 
   return {
     now,

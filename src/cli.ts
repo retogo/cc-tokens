@@ -136,6 +136,9 @@ async function main() {
         : buildBreakdowns(
             from !== null ? scan.records.filter((r) => r.ts >= from) : scan.records,
             from !== null ? scan.toolEvents.filter((e) => e.ts >= from) : scan.toolEvents,
+            from !== null
+              ? scan.subagentToolEvents.filter((e) => e.ts >= from)
+              : scan.subagentToolEvents,
             { weighting: config.weighting, overrides: config.priceOverrides },
           );
 

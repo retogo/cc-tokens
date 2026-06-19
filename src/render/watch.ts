@@ -20,6 +20,7 @@ const SHOW = "\x1b[?25h";
 function merge(into: ScanResult, more: ScanResult): void {
   for (const r of more.records) into.records.push(r);
   for (const e of more.toolEvents) into.toolEvents.push(e);
+  for (const e of more.subagentToolEvents) into.subagentToolEvents.push(e);
   // sessionTitles は Scanner 内部で累積されており、`more` が常に最新スナップショット。空でなければ採用する。
   if (more.sessionTitles.size > 0) into.sessionTitles = more.sessionTitles;
 }
@@ -37,6 +38,10 @@ export function pruneState(state: ScanResult, cutoffMs: number): void {
   const headTool = state.toolEvents[0];
   if (headTool && headTool.ts < cutoffMs) {
     state.toolEvents = state.toolEvents.filter((e) => e.ts >= cutoffMs);
+  }
+  const headSubTool = state.subagentToolEvents[0];
+  if (headSubTool && headSubTool.ts < cutoffMs) {
+    state.subagentToolEvents = state.subagentToolEvents.filter((e) => e.ts >= cutoffMs);
   }
 }
 
@@ -57,7 +62,12 @@ const OFFICIAL_BACKOFF_MAX_MS = 15 * 60_000;
  */
 export async function watch(root: string, config: Config, opts: WatchOptions): Promise<void> {
   const scanner = new Scanner(root);
-  const state: ScanResult = { records: [], toolEvents: [], sessionTitles: new Map() };
+  const state: ScanResult = {
+    records: [],
+    toolEvents: [],
+    subagentToolEvents: [],
+    sessionTitles: new Map(),
+  };
   // 起動時は直近 2 ウィンドウ分のみシード（巨大履歴の全読みを避ける）。
   const seedSince = Date.now() - 2 * config.windowHours * 3600_000;
   merge(state, await scanner.seed(seedSince));

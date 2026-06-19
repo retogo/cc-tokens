@@ -224,6 +224,25 @@ function walkDrill(
   if (n.children.length > topN) {
     lines.push(`${baseIndent}${"  ".repeat(depth)}${c.dim(`… ${n.children.length - topN} more`)}`);
   }
+  // agent 葉ノード: その agent が内部で使ったツール推定をぶら下げる（chars/4、`~` マーク）。
+  // agent 自身の実消費 (n.tokens) とは別量なので加算関係にはない。
+  if (n.tools && n.tools.length > 0) {
+    const toolIndent = `${indent}  `;
+    for (const tool of n.tools.slice(0, topN)) {
+      const toolTok = tick(
+        t,
+        `agent-tool:${keyPath}/${tool.tool}`,
+        tool.tokens,
+        formatTokens(tool.tokens).padStart(7),
+      );
+      lines.push(
+        `${toolIndent}${c.dim("~ ")}${toolTok}  ${c.dim(`×${String(tool.calls).padStart(3)}`)}  ${c.dim(tool.tool)}`,
+      );
+    }
+    if (n.tools.length > topN) {
+      lines.push(`${toolIndent}${c.dim(`… ${n.tools.length - topN} more`)}`);
+    }
+  }
 }
 
 /**

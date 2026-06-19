@@ -154,9 +154,9 @@ describe("Scanner seed + poll (テスト12)", () => {
     expect(r.toolEvents.some((e) => e.uses.some((u) => u.name === "GhostTool"))).toBe(false);
   });
 
-  test("subagent ファイルの tool_use は toolEvents に含めない（二重計上回避）", async () => {
+  test("subagent ファイルの tool_use は toolEvents に含めず subagentToolEvents へ振り分ける", async () => {
     const sc = new Scanner(join(root, "projects"));
-    const subDir = join(proj, "s", "subagents", "workflows", "wf");
+    const subDir = join(proj, "s", "subagents", "workflows", "wf-sub-1");
     mkdirSync(subDir, { recursive: true });
     const subLine = JSON.stringify({
       type: "assistant",
@@ -174,11 +174,30 @@ describe("Scanner seed + poll (テスト12)", () => {
       sessionId: "s",
       isSidechain: true,
     });
-    writeFileSync(join(subDir, "agent-x.jsonl"), `${subLine}\n`);
+    const resultLine = JSON.stringify({
+      type: "user",
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "g1", content: "01234567" }],
+      },
+      timestamp: "2026-06-18T00:04:01.000Z",
+      sessionId: "s",
+      isSidechain: true,
+    });
+    writeFileSync(join(subDir, "agent-x.jsonl"), `${subLine}\n${resultLine}\n`);
     const r = await sc.seed();
     // record は含む（sidechain として 5h に効く）
     expect(r.records.some((x) => x.agentKind === "workflow")).toBe(true);
-    // が、toolEvents には Grep を含めない
+    // メインの toolEvents には Grep を含めない
     expect(r.toolEvents.some((e) => e.uses.some((u) => u.name === "Grep"))).toBe(false);
+    // 代わりに subagentToolEvents に agentId / workflowId 付きで入る
+    const subEvs = r.subagentToolEvents.filter(
+      (e) =>
+        e.uses.some((u) => u.name === "Grep") || e.results.some((res) => res.toolUseId === "g1"),
+    );
+    expect(subEvs.length).toBeGreaterThan(0);
+    expect(subEvs.every((e) => e.agentKind === "workflow")).toBe(true);
+    expect(subEvs.every((e) => e.agentId === "agent-x")).toBe(true);
+    expect(subEvs.every((e) => e.workflowId === "wf-sub-1")).toBe(true);
   });
 });
