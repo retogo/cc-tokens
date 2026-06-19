@@ -2,10 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { parseLine, parseLineFull } from "../src/parse.ts";
 
 const MAIN_PATH = "/x/projects/-fixture-proj/sess-aaa.jsonl";
-const WF_PATH =
-  "/x/projects/-fixture-proj/sess-aaa/subagents/workflows/wf-1/agent-bbb.jsonl";
-const TASK_PATH =
-  "/x/projects/-fixture-proj/sess-aaa/subagents/agent-ccc.jsonl";
+const WF_PATH = "/x/projects/-fixture-proj/sess-aaa/subagents/workflows/wf-1/agent-bbb.jsonl";
+const TASK_PATH = "/x/projects/-fixture-proj/sess-aaa/subagents/agent-ccc.jsonl";
 
 const assistantLine = JSON.stringify({
   type: "assistant",
@@ -103,7 +101,7 @@ describe("セッションタイトル行の抽出 (ai-title / custom-title)", ()
 
 describe("非対象行・壊れた行は null (テスト2)", () => {
   test.each([
-    ['mode 行', '{"type":"mode","mode":"normal","sessionId":"s"}'],
+    ["mode 行", '{"type":"mode","mode":"normal","sessionId":"s"}'],
     ["user 行", '{"type":"user","message":{"role":"user","content":[]}}'],
     ["system 行", '{"type":"system","subtype":"info"}'],
     ["usage 無し assistant", '{"type":"assistant","message":{"model":"m","content":[]}}'],

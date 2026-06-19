@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  burnRateOverWindow,
-  FIVE_HOURS_MS,
-  projectExhaustion,
-} from "../src/blocks.ts";
+import { burnRateOverWindow, FIVE_HOURS_MS, projectExhaustion } from "../src/blocks.ts";
 import type { TokenUsage, TurnRecord } from "../src/types.ts";
 
 const MIN = 60 * 1000;

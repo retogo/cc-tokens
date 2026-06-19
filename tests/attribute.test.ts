@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  buildSubagentDrill,
-  buildToolBreakdown,
-  estTokens,
-} from "../src/attribute.ts";
+import { buildSubagentDrill, buildToolBreakdown, estTokens } from "../src/attribute.ts";
 import type { ToolResultRef, ToolUseRef } from "../src/parse.ts";
 import type { TokenUsage, TurnRecord } from "../src/types.ts";
 
@@ -82,11 +78,17 @@ describe("直接ツールの推定帰属 (テスト9)", () => {
     const events = [
       ev([{ id: "u1", name: "Read" }]),
       ev([], [{ toolUseId: "u1", chars: 40 }]),
-      ev([{ id: "u2", name: "Bash" }, { id: "u3", name: "Read" }]),
-      ev([], [
-        { toolUseId: "u2", chars: 80 },
-        { toolUseId: "u3", chars: 40 },
+      ev([
+        { id: "u2", name: "Bash" },
+        { id: "u3", name: "Read" },
       ]),
+      ev(
+        [],
+        [
+          { toolUseId: "u2", chars: 80 },
+          { toolUseId: "u3", chars: 40 },
+        ],
+      ),
     ];
     const rows = buildToolBreakdown(events, []);
     const read = rows.find((r) => r.tool === "Read")!;
@@ -99,10 +101,7 @@ describe("直接ツールの推定帰属 (テスト9)", () => {
   });
 
   test("Task/Agent の直接結果は二重計上を避けるため除外", () => {
-    const events = [
-      ev([{ id: "t1", name: "Task" }]),
-      ev([], [{ toolUseId: "t1", chars: 4000 }]),
-    ];
+    const events = [ev([{ id: "t1", name: "Task" }]), ev([], [{ toolUseId: "t1", chars: 4000 }])];
     const rows = buildToolBreakdown(events, []);
     expect(rows.find((r) => r.tool === "Task")).toBeUndefined();
   });
@@ -123,13 +122,8 @@ describe("サブエージェントの正確帰属 (テスト8)", () => {
   });
 
   test("share は tokens 降順で合計 1", () => {
-    const events = [
-      ev([{ id: "u1", name: "Read" }]),
-      ev([], [{ toolUseId: "u1", chars: 400 }]),
-    ];
-    const subs = [
-      subRec({ input: 100, output: 0, cacheCreation: 0, cacheRead: 0 }, "task"),
-    ];
+    const events = [ev([{ id: "u1", name: "Read" }]), ev([], [{ toolUseId: "u1", chars: 400 }])];
+    const subs = [subRec({ input: 100, output: 0, cacheCreation: 0, cacheRead: 0 }, "task")];
     const rows = buildToolBreakdown(events, subs);
     expect(rows[0]!.tokens).toBeGreaterThanOrEqual(rows[rows.length - 1]!.tokens);
     const total = rows.reduce((s, r) => s + r.share, 0);

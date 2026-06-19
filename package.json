@@ -14,9 +14,13 @@
   "scripts": {
     "cctok": "bun run src/cli.ts",
     "test": "bun test",
-    "typecheck": "bun run tsc --noEmit"
+    "typecheck": "bun run tsc --noEmit",
+    "format": "biome format --write .",
+    "lint": "biome lint .",
+    "check": "biome check --write ."
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.16",
     "@types/bun": "latest",
     "typescript": "^5"
   }

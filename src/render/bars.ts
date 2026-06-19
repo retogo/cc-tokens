@@ -85,11 +85,12 @@ export class Ticker {
   fmt(key: string, value: number, text: string, arrow = true): string {
     const p = this.prev.get(key);
     this.prev.set(key, value);
-    const changed = p !== undefined && value !== p;
-    if (!arrow) return changed ? (value > p! ? color.green : color.red)(text) : text;
-    // 変化が無くても三角と同じ 1 文字幅のスペースを足してレイアウトを固定する。
-    if (!changed) return text + " ";
-    const up = value > p!;
+    if (p === undefined || value === p) {
+      // 初回 or 変化無し: 三角と同じ 1 文字幅のスペースを足してレイアウトを固定する。
+      return arrow ? `${text} ` : text;
+    }
+    const up = value > p;
+    if (!arrow) return (up ? color.green : color.red)(text);
     return (up ? color.green : color.red)(text + (up ? "▲" : "▼"));
   }
 }

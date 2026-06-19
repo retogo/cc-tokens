@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { join } from "node:path";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { mkdtempSync, mkdirSync, rmSync, appendFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { Scanner } from "../src/scan.ts";
 
 const root = mkdtempSync(join(tmpdir(), "cctok-scan-"));
@@ -35,7 +35,7 @@ describe("Scanner seed + poll (テスト12)", () => {
   const proj = join(root, "projects", "-p");
   mkdirSync(proj, { recursive: true });
   const file = join(proj, "s.jsonl");
-  writeFileSync(file, assistant("2026-06-18T00:00:00.000Z", 10, "Read") + "\n");
+  writeFileSync(file, `${assistant("2026-06-18T00:00:00.000Z", 10, "Read")}\n`);
 
   test("seed は既存行を読み、records と toolEvents を返す", async () => {
     const sc = new Scanner(join(root, "projects"));
@@ -49,7 +49,7 @@ describe("Scanner seed + poll (テスト12)", () => {
     const sc = new Scanner(join(root, "projects"));
     await sc.seed();
     // seed 後の追記
-    appendFileSync(file, assistant("2026-06-18T00:01:00.000Z", 20, "Bash") + "\n");
+    appendFileSync(file, `${assistant("2026-06-18T00:01:00.000Z", 20, "Bash")}\n`);
     const r1 = await sc.poll();
     expect(r1.records).toHaveLength(1);
     expect(r1.records[0]!.usage.output).toBe(20);
@@ -79,10 +79,7 @@ describe("Scanner seed + poll (テスト12)", () => {
     await sc.seed();
     const proj2 = join(root, "projects", "-p2");
     mkdirSync(proj2, { recursive: true });
-    writeFileSync(
-      join(proj2, "new.jsonl"),
-      assistant("2026-06-18T00:03:00.000Z", 40) + "\n",
-    );
+    writeFileSync(join(proj2, "new.jsonl"), `${assistant("2026-06-18T00:03:00.000Z", 40)}\n`);
     const r = await sc.poll();
     expect(r.records.some((x) => x.usage.output === 40)).toBe(true);
   });
@@ -94,13 +91,15 @@ describe("Scanner seed + poll (テスト12)", () => {
     const f1 = join(titleProj, "s1.jsonl");
     writeFileSync(
       f1,
-      JSON.stringify({ type: "ai-title", aiTitle: "auto name", sessionId: "s1" }) + "\n" +
-        JSON.stringify({ type: "custom-title", customTitle: "user name", sessionId: "s1" }) + "\n",
+      JSON.stringify({ type: "ai-title", aiTitle: "auto name", sessionId: "s1" }) +
+        "\n" +
+        JSON.stringify({ type: "custom-title", customTitle: "user name", sessionId: "s1" }) +
+        "\n",
     );
     const f2 = join(titleProj, "s2.jsonl");
     writeFileSync(
       f2,
-      JSON.stringify({ type: "ai-title", aiTitle: "only ai", sessionId: "s2" }) + "\n",
+      `${JSON.stringify({ type: "ai-title", aiTitle: "only ai", sessionId: "s2" })}\n`,
     );
     const r = await sc.seed();
     expect(r.sessionTitles.get("s1")).toBe("user name");
@@ -112,15 +111,12 @@ describe("Scanner seed + poll (テスト12)", () => {
     const proj3 = join(root, "projects", "-titles2");
     mkdirSync(proj3, { recursive: true });
     const f = join(proj3, "s.jsonl");
-    writeFileSync(
-      f,
-      JSON.stringify({ type: "ai-title", aiTitle: "auto", sessionId: "z" }) + "\n",
-    );
+    writeFileSync(f, `${JSON.stringify({ type: "ai-title", aiTitle: "auto", sessionId: "z" })}\n`);
     const r1 = await sc.seed();
     expect(r1.sessionTitles.get("z")).toBe("auto");
     appendFileSync(
       f,
-      JSON.stringify({ type: "custom-title", customTitle: "manual", sessionId: "z" }) + "\n",
+      `${JSON.stringify({ type: "custom-title", customTitle: "manual", sessionId: "z" })}\n`,
     );
     const r2 = await sc.poll();
     expect(r2.sessionTitles.get("z")).toBe("manual");
@@ -133,8 +129,10 @@ describe("Scanner seed + poll (テスト12)", () => {
     const f = join(proj4, "s.jsonl");
     writeFileSync(
       f,
-      JSON.stringify({ type: "custom-title", customTitle: "manual", sessionId: "k" }) + "\n" +
-        JSON.stringify({ type: "ai-title", aiTitle: "auto", sessionId: "k" }) + "\n",
+      JSON.stringify({ type: "custom-title", customTitle: "manual", sessionId: "k" }) +
+        "\n" +
+        JSON.stringify({ type: "ai-title", aiTitle: "auto", sessionId: "k" }) +
+        "\n",
     );
     const r = await sc.seed();
     expect(r.sessionTitles.get("k")).toBe("manual");
@@ -151,7 +149,7 @@ describe("Scanner seed + poll (テスト12)", () => {
       message: { model: "m", content: [{ type: "tool_use", name: "GhostTool", id: "g1" }] },
       sessionId: "s",
     });
-    writeFileSync(f, line + "\n");
+    writeFileSync(f, `${line}\n`);
     const r = await sc.seed();
     expect(r.toolEvents.some((e) => e.uses.some((u) => u.name === "GhostTool"))).toBe(false);
   });
@@ -165,13 +163,18 @@ describe("Scanner seed + poll (テスト12)", () => {
       message: {
         model: "claude-opus-4-8",
         content: [{ type: "tool_use", name: "Grep", id: "g1" }],
-        usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        },
       },
       timestamp: "2026-06-18T00:04:00.000Z",
       sessionId: "s",
       isSidechain: true,
     });
-    writeFileSync(join(subDir, "agent-x.jsonl"), subLine + "\n");
+    writeFileSync(join(subDir, "agent-x.jsonl"), `${subLine}\n`);
     const r = await sc.seed();
     // record は含む（sidechain として 5h に効く）
     expect(r.records.some((x) => x.agentKind === "workflow")).toBe(true);

@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DEFAULTS, loadConfig } from "../src/config.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "cctok-"));

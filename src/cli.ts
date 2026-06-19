@@ -1,15 +1,15 @@
 #!/usr/bin/env bun
 import { parseArgs } from "node:util";
-import { claudeProjectsDir } from "./paths.ts";
 import { loadConfig } from "./config.ts";
-import { Scanner } from "./scan.ts";
-import { buildBreakdowns, buildSnapshot, rangeStart } from "./snapshot.ts";
-import type { Since } from "./snapshot.ts";
-import { renderReport, renderUsage } from "./render/report.ts";
-import type { ByAxis } from "./render/report.ts";
-import { watch } from "./render/watch.ts";
-import { fetchOfficialUsage, OfficialFetchError } from "./official.ts";
 import type { OfficialUsage } from "./official.ts";
+import { fetchOfficialUsage, OfficialFetchError } from "./official.ts";
+import { claudeProjectsDir } from "./paths.ts";
+import type { ByAxis } from "./render/report.ts";
+import { renderReport, renderUsage } from "./render/report.ts";
+import { watch } from "./render/watch.ts";
+import { Scanner } from "./scan.ts";
+import type { Since } from "./snapshot.ts";
+import { buildBreakdowns, buildSnapshot, rangeStart } from "./snapshot.ts";
 
 const HELP = `cctok — Claude Code token monitor
 
@@ -97,7 +97,7 @@ async function main() {
     const now = Date.now();
     try {
       const official = await fetchOfficialUsage(now);
-      process.stdout.write(renderUsage(official, now) + "\n");
+      process.stdout.write(`${renderUsage(official, now)}\n`);
     } catch (e) {
       const msg = e instanceof OfficialFetchError ? e.message : String(e);
       process.stderr.write(`Failed to fetch usage: ${msg}\n`);
@@ -144,7 +144,7 @@ async function main() {
       axes: parseAxes(values.by, ["tool", "model", "session", "project"]),
       expand: values.expand ?? false,
     });
-    process.stdout.write(body + "\n");
+    process.stdout.write(`${body}\n`);
     return;
   }
 

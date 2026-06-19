@@ -1,19 +1,13 @@
-import type {
-  BreakdownRow,
-  BurnRate,
-  Projection,
-  TokenUsage,
-  TurnRecord,
-} from "./types.ts";
-import type { Config } from "./config.ts";
-import type { ScanResult } from "./scan.ts";
+import { byHour, byModel, byProject, bySession } from "./aggregate.ts";
 import type { DrillNode, ToolBreakdownRow, ToolEvent } from "./attribute.ts";
-import type { OfficialUsage } from "./official.ts";
-import type { PriceOverrides, Weighting } from "./pricing.ts";
 import { buildSubagentDrill, buildToolBreakdown } from "./attribute.ts";
 import { burnRateOverWindow, projectExhaustion } from "./blocks.ts";
-import { byHour, byModel, byProject, bySession } from "./aggregate.ts";
+import type { Config } from "./config.ts";
+import type { OfficialUsage } from "./official.ts";
+import type { PriceOverrides, Weighting } from "./pricing.ts";
 import { costOf, weightedOf } from "./pricing.ts";
+import type { ScanResult } from "./scan.ts";
+import type { BreakdownRow, BurnRate, Projection, TokenUsage, TurnRecord } from "./types.ts";
 
 const MIN = 60_000;
 
@@ -59,8 +53,6 @@ export function rangeStart(since: Since, now: number): number | null {
       return now - 7 * 24 * 3600_000;
     case "30d":
       return now - 30 * 24 * 3600_000;
-    case "block":
-    case "all":
     default:
       return null;
   }
@@ -114,7 +106,7 @@ function costSum(records: TurnRecord[], overrides: Config["priceOverrides"]) {
   return c;
 }
 
-function emptyBurn(): BurnRate {
+function _emptyBurn(): BurnRate {
   return { weightedPerMin: 0, rawPerMin: 0 };
 }
 
@@ -123,20 +115,14 @@ function emptyTotals(): TokenUsage {
 }
 
 /** windowStart〜now を buckets 等分し、生トークン量を集計する（スパークライン用）。 */
-function sparkBuckets(
-  records: TurnRecord[],
-  from: number,
-  to: number,
-  buckets = 24,
-): number[] {
+function sparkBuckets(records: TurnRecord[], from: number, to: number, buckets = 24): number[] {
   const span = Math.max(to - from, 1);
   const out = new Array<number>(buckets).fill(0);
   for (const r of records) {
     if (r.ts < from || r.ts > to) continue;
-    const idx = Math.min(
-      buckets - 1,
-      Math.max(0, Math.floor(((r.ts - from) / span) * buckets)),
-    );
+    const idx = Math.min(buckets - 1, Math.max(0, Math.floor(((r.ts - from) / span) * buckets)));
+    // idx は [0, buckets) にクランプ済みなので out[idx] は必ず存在する。
+    // biome-ignore lint/style/noNonNullAssertion: clamped index, fallback would be unreachable
     out[idx]! += r.usage.input + r.usage.output + r.usage.cacheCreation;
   }
   return out;
@@ -177,9 +163,7 @@ export function buildSnapshot(
   // 逆算 limit が桁違いに膨らみ projection / budgetBurnPerMin が誤誘導するため、閾値を設ける。
   const MIN_UTILIZATION_FOR_LIMIT = 1.0;
   const effectiveLimit =
-    officialFive &&
-    officialFive.utilization >= MIN_UTILIZATION_FOR_LIMIT &&
-    usedWeighted > 0
+    officialFive && officialFive.utilization >= MIN_UTILIZATION_FOR_LIMIT && usedWeighted > 0
       ? usedWeighted / (officialFive.utilization / 100)
       : null;
 
@@ -194,13 +178,18 @@ export function buildSnapshot(
     return acc;
   }, emptyTotals());
 
-  const burnWindow = burnRateOverWindow(recs, now - windowStart, now, config.weighting, config.priceOverrides);
+  const burnWindow = burnRateOverWindow(
+    recs,
+    now - windowStart,
+    now,
+    config.weighting,
+    config.priceOverrides,
+  );
   const burn10 = burnRateOverWindow(recs, 10 * MIN, now, config.weighting, config.priceOverrides);
   const burnHour = burnRateOverWindow(recs, 60 * MIN, now, config.weighting, config.priceOverrides);
 
   // 枯渇予測は直近(10分)バーンを優先、無ければウィンドウ平均。
-  const burnForProj =
-    burn10.weightedPerMin > 0 ? burn10.weightedPerMin : burnWindow.weightedPerMin;
+  const burnForProj = burn10.weightedPerMin > 0 ? burn10.weightedPerMin : burnWindow.weightedPerMin;
   const projection =
     recs.length > 0
       ? projectExhaustion(usedWeighted, effectiveLimit, burnForProj, now, windowEnd)

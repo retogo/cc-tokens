@@ -2,9 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { parseOfficialUsage } from "../src/official.ts";
 
-const raw = await Bun.file(
-  join(import.meta.dir, "..", "fixtures", "official-usage.json"),
-).json();
+const raw = await Bun.file(join(import.meta.dir, "..", "fixtures", "official-usage.json")).json();
 const FETCHED = Date.parse("2026-06-18T03:30:00.000Z");
 
 describe("parseOfficialUsage（実レスポンス）", () => {
@@ -13,9 +11,7 @@ describe("parseOfficialUsage（実レスポンス）", () => {
   test("five_hour の utilization と resets_at を取り出す", () => {
     expect(u.fiveHour).not.toBeNull();
     expect(u.fiveHour!.utilization).toBe(50);
-    expect(u.fiveHour!.resetsAt).toBe(
-      Date.parse("2026-06-18T08:30:00.684728+00:00"),
-    );
+    expect(u.fiveHour!.resetsAt).toBe(Date.parse("2026-06-18T08:30:00.684728+00:00"));
   });
 
   test("seven_day も取り出す", () => {

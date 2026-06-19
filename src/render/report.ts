@@ -1,7 +1,7 @@
-import type { BreakdownRow } from "../types.ts";
 import type { DrillNode, ToolBreakdownRow } from "../attribute.ts";
-import type { RangedBreakdowns, Snapshot } from "../snapshot.ts";
 import type { OfficialUsage } from "../official.ts";
+import type { RangedBreakdowns, Snapshot } from "../snapshot.ts";
+import type { BreakdownRow } from "../types.ts";
 import {
   bar,
   color,
@@ -10,15 +10,10 @@ import {
   formatUSD,
   gaugeColor,
   sparkline,
-  Ticker,
+  type Ticker,
 } from "./bars.ts";
 
-export type ByAxis =
-  | "tool"
-  | "model"
-  | "session"
-  | "project"
-  | "hour";
+export type ByAxis = "tool" | "model" | "session" | "project" | "hour";
 
 export interface ReportOptions {
   topN: number;
@@ -57,7 +52,7 @@ function shortKey(key: string): string {
 /** name 表示用に長すぎる title を切り詰める（端末幅を圧迫しない程度）。 */
 function shortTitle(title: string): string {
   const max = 48;
-  return title.length > max ? title.slice(0, max - 1) + "…" : title;
+  return title.length > max ? `${title.slice(0, max - 1)}…` : title;
 }
 
 /** モデル名の末尾 cutoff サフィックス（-20YYMMDD）を落として表示。 */
@@ -117,9 +112,10 @@ export function renderBlockStatus(s: Snapshot, t?: Ticker): string {
     const within = s.resetTs === null || s.projection.exhaustionTs <= s.resetTs;
     // 枯渇する場合のみ表示（枯渇しない = 正常なので非表示）
     if (within) {
-      const msg = eta <= 0
-        ? c.red(`depleted (${timeHHMM(s.projection.exhaustionTs)})`)
-        : c.red(`in ${formatDuration(eta)} (${timeHHMM(s.projection.exhaustionTs)})`);
+      const msg =
+        eta <= 0
+          ? c.red(`depleted (${timeHHMM(s.projection.exhaustionTs)})`)
+          : c.red(`in ${formatDuration(eta)} (${timeHHMM(s.projection.exhaustionTs)})`);
       lines.push(`  ${c.dim(padLabel("Run-out"))} ${msg}`);
     }
   }
@@ -145,7 +141,7 @@ export function renderUsage(o: OfficialUsage, now: number): string {
   const lines = [c.bold("● usage (/api/oauth/usage)")];
   const win = (label: string, w: { utilization: number; resetsAt: number } | null) => {
     if (!w) {
-      lines.push(`  ${label}  ` + c.dim("(none)"));
+      lines.push(`  ${label}  ${c.dim("(none)")}`);
       return;
     }
     const g = gaugeColor(w.utilization / 100);
@@ -201,6 +197,8 @@ function renderBreakdown(
 
 /** ANSI 制御を除いた可視幅。インデント計算用。 */
 function visibleWidth(s: string): number {
+  // ANSI escape (CSI) を意図的にマッチするため制御文字が必要。
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI CSI escapes
   return s.replace(/\x1b\[[0-9;]*m/g, "").length;
 }
 
@@ -217,7 +215,9 @@ function walkDrill(
   const indent = baseIndent + "  ".repeat(depth - 1);
   const tokStr = tick(t, `agents:${keyPath}`, n.tokens, formatTokens(n.tokens).padStart(7));
   const marker = depth === 1 ? "▸ " : c.dim("· ");
-  lines.push(`${indent}${marker}${tokStr}  ${c.dim(`×${String(n.turns).padStart(3)}`)}  ${n.label}`);
+  lines.push(
+    `${indent}${marker}${tokStr}  ${c.dim(`×${String(n.turns).padStart(3)}`)}  ${n.label}`,
+  );
   for (const ch of n.children.slice(0, topN)) {
     walkDrill(lines, ch, depth + 1, `${keyPath}/${ch.key}`, topN, baseIndent, t);
   }
@@ -307,9 +307,7 @@ export function renderReport(
         break;
       }
       case "project":
-        sections.push(
-          renderBreakdown("By project", breakdowns.byProject, opts.topN, "project", t),
-        );
+        sections.push(renderBreakdown("By project", breakdowns.byProject, opts.topN, "project", t));
         break;
       case "hour":
         sections.push(renderBreakdown("By hour", breakdowns.byHour, opts.topN, "hour", t));

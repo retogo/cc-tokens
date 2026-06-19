@@ -1,6 +1,6 @@
-import type { BreakdownRow, TokenUsage, TurnRecord } from "./types.ts";
 import type { PriceOverrides, Weighting } from "./pricing.ts";
 import { costOf, weightedOf } from "./pricing.ts";
+import type { BreakdownRow, TokenUsage, TurnRecord } from "./types.ts";
 
 export interface AggregateOptions {
   weighting?: Weighting;
@@ -63,14 +63,12 @@ export function groupBy(
   return rows;
 }
 
-export const byModel = (r: TurnRecord[], o?: AggregateOptions) =>
-  groupBy(r, (x) => x.model, o);
+export const byModel = (r: TurnRecord[], o?: AggregateOptions) => groupBy(r, (x) => x.model, o);
 
 export const bySession = (r: TurnRecord[], o?: AggregateOptions) =>
   groupBy(r, (x) => x.sessionId, o);
 
-export const byProject = (r: TurnRecord[], o?: AggregateOptions) =>
-  groupBy(r, (x) => x.project, o);
+export const byProject = (r: TurnRecord[], o?: AggregateOptions) => groupBy(r, (x) => x.project, o);
 
 /** ローカル時刻の時（00..23）で集計。 */
 export const byHour = (r: TurnRecord[], o?: AggregateOptions) =>

@@ -1,12 +1,12 @@
 import type { Config } from "../config.ts";
+import type { OfficialUsage } from "../official.ts";
+import { fetchOfficialUsage, OfficialFetchError } from "../official.ts";
 import type { ScanResult } from "../scan.ts";
 import { Scanner } from "../scan.ts";
 import { buildSnapshot } from "../snapshot.ts";
-import { renderReport } from "./report.ts";
-import type { ReportOptions } from "./report.ts";
 import { color, Ticker } from "./bars.ts";
-import { fetchOfficialUsage, OfficialFetchError } from "../official.ts";
-import type { OfficialUsage } from "../official.ts";
+import type { ReportOptions } from "./report.ts";
+import { renderReport } from "./report.ts";
 
 // alternate screen 上に独自のビューポートを描く（vim/less と同じ仕組み）。
 // 内容は全行レンダリングし、画面に収まらない分は「アプリ内仮想スクロール」で見せる。
@@ -30,10 +30,12 @@ function merge(into: ScanResult, more: ScanResult): void {
  * （seed と同じ「直近 2 ウィンドウ」前提を rebuild 毎に維持する。）
  */
 export function pruneState(state: ScanResult, cutoffMs: number): void {
-  if (state.records.length > 0 && state.records[0]!.ts < cutoffMs) {
+  const head = state.records[0];
+  if (head && head.ts < cutoffMs) {
     state.records = state.records.filter((r) => r.ts >= cutoffMs);
   }
-  if (state.toolEvents.length > 0 && state.toolEvents[0]!.ts < cutoffMs) {
+  const headTool = state.toolEvents[0];
+  if (headTool && headTool.ts < cutoffMs) {
     state.toolEvents = state.toolEvents.filter((e) => e.ts >= cutoffMs);
   }
 }
@@ -53,11 +55,7 @@ const OFFICIAL_BACKOFF_MAX_MS = 15 * 60_000;
  * ライブ監視ループ。seed 後、interval 毎に追記分を tail してスナップショットを再描画する。
  * SIGINT でカーソルを復帰して終了。now は実時間で更新する。
  */
-export async function watch(
-  root: string,
-  config: Config,
-  opts: WatchOptions,
-): Promise<void> {
+export async function watch(root: string, config: Config, opts: WatchOptions): Promise<void> {
   const scanner = new Scanner(root);
   const state: ScanResult = { records: [], toolEvents: [], sessionTitles: new Map() };
   // 起動時は直近 2 ウィンドウ分のみシード（巨大履歴の全読みを避ける）。
@@ -166,12 +164,12 @@ export async function watch(
       // 401（トークン期限切れ）は復旧がユーザ操作（claude 再起動）に依存するので backoff を伸ばさず、
       // 短間隔で再試行することで再認証直後に古い表示を引きずらないようにする。
       const is401 = e instanceof OfficialFetchError && e.status === 401;
-      const retry =
-        e instanceof OfficialFetchError && e.retryAfterMs ? e.retryAfterMs : backoffMs;
+      const retry = e instanceof OfficialFetchError && e.retryAfterMs ? e.retryAfterMs : backoffMs;
       if (!is401) {
         backoffMs = Math.min(backoffMs * 2, OFFICIAL_BACKOFF_MAX_MS);
       }
-      nextOfficialAt = Date.now() + (is401 ? OFFICIAL_REFRESH_MS : Math.max(retry, OFFICIAL_REFRESH_MS));
+      nextOfficialAt =
+        Date.now() + (is401 ? OFFICIAL_REFRESH_MS : Math.max(retry, OFFICIAL_REFRESH_MS));
     }
   };
   await refreshOfficial();
@@ -228,7 +226,7 @@ export async function watch(
     const footer = color.dim(
       `Updated ${new Date(lastUpdate).toLocaleTimeString()}  /  every ${opts.intervalMs / 1000}s  /  Ctrl-O: expand  /  Ctrl-N: ${showSessionIds ? "name" : "id"}${refreshHint}${pos}  /  q: quit`,
     );
-    process.stdout.write(REDRAW + visible.join("\n") + "\n" + footer);
+    process.stdout.write(`${REDRAW + visible.join("\n")}\n${footer}`);
   };
 
   rebuild();

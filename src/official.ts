@@ -39,29 +39,39 @@ function parseTs(v: unknown): number | null {
   return Number.isNaN(t) ? null : t;
 }
 
-function parseWindow(v: any): OfficialWindow | null {
-  if (!v || typeof v.utilization !== "number") return null;
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+
+function parseWindow(v: unknown): OfficialWindow | null {
+  if (!isRecord(v) || typeof v.utilization !== "number") return null;
   const resetsAt = parseTs(v.resets_at);
   if (resetsAt === null) return null;
   return { utilization: v.utilization, resetsAt };
 }
 
 /** /api/oauth/usage のレスポンス JSON を正規化する（null/欠落に強い）。 */
-export function parseOfficialUsage(raw: any, fetchedAt: number): OfficialUsage {
-  const limits: OfficialLimit[] = Array.isArray(raw?.limits)
-    ? raw.limits.map((l: any) => ({
-        kind: String(l?.kind ?? ""),
-        group: String(l?.group ?? ""),
-        percent: typeof l?.percent === "number" ? l.percent : 0,
-        severity: String(l?.severity ?? "normal"),
-        resetsAt: parseTs(l?.resets_at),
-        scopeLabel: l?.scope?.model?.display_name ?? null,
-        isActive: l?.is_active === true,
-      }))
+export function parseOfficialUsage(raw: unknown, fetchedAt: number): OfficialUsage {
+  const r = isRecord(raw) ? raw : {};
+  const limits: OfficialLimit[] = Array.isArray(r.limits)
+    ? r.limits.map((l: unknown) => {
+        const lr = isRecord(l) ? l : {};
+        const scope = isRecord(lr.scope) ? lr.scope : {};
+        const model = isRecord(scope.model) ? scope.model : {};
+        return {
+          kind: String(lr.kind ?? ""),
+          group: String(lr.group ?? ""),
+          percent: typeof lr.percent === "number" ? lr.percent : 0,
+          severity: String(lr.severity ?? "normal"),
+          resetsAt: parseTs(lr.resets_at),
+          scopeLabel: typeof model.display_name === "string" ? model.display_name : null,
+          isActive: lr.is_active === true,
+        };
+      })
     : [];
   return {
-    fiveHour: parseWindow(raw?.five_hour),
-    sevenDay: parseWindow(raw?.seven_day),
+    fiveHour: parseWindow(r.five_hour),
+    sevenDay: parseWindow(r.seven_day),
     limits,
     fetchedAt,
   };
@@ -76,10 +86,10 @@ export async function getOAuthToken(): Promise<string | null> {
   // 1) macOS Keychain
   if (process.platform === "darwin") {
     try {
-      const proc = Bun.spawn(
-        ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
-        { stdout: "pipe", stderr: "ignore" },
-      );
+      const proc = Bun.spawn(["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"], {
+        stdout: "pipe",
+        stderr: "ignore",
+      });
       const out = (await new Response(proc.stdout).text()).trim();
       await proc.exited;
       const token = tokenFromJson(out);
@@ -137,9 +147,7 @@ function parseRetryAfter(res: Response): number | undefined {
 export async function fetchOfficialUsage(now: number): Promise<OfficialUsage> {
   const token = await getOAuthToken();
   if (!token) {
-    throw new OfficialFetchError(
-      "OAuth token not found (Keychain / ~/.claude/.credentials.json)",
-    );
+    throw new OfficialFetchError("OAuth token not found (Keychain / ~/.claude/.credentials.json)");
   }
   const res = await fetch(USAGE_URL, {
     headers: {

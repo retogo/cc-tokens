@@ -39,6 +39,8 @@ export function priceFor(model: string, overrides?: PriceOverrides): ModelPrice 
       break;
     }
   }
+  // family は Object.keys(PRICES) 由来なので PRICES[family] は必ず存在する。
+  // biome-ignore lint/style/noNonNullAssertion: key derived from Object.keys(PRICES)
   const base = family ? PRICES[family]! : FALLBACK;
   if (family && overrides?.[family]) {
     return { ...base, ...overrides[family] };
@@ -47,11 +49,7 @@ export function priceFor(model: string, overrides?: PriceOverrides): ModelPrice 
 }
 
 /** usage のコスト（ドル）。 */
-export function costOf(
-  usage: TokenUsage,
-  model: string,
-  overrides?: PriceOverrides,
-): number {
+export function costOf(usage: TokenUsage, model: string, overrides?: PriceOverrides): number {
   const p = priceFor(model, overrides);
   return (
     (usage.input * p.input +
@@ -63,9 +61,7 @@ export function costOf(
 }
 
 /** 加重指標の定義。cost = コスト換算（既定）、raw = 生トークン（cache_read 除外）。 */
-export type Weighting =
-  | { mode: "cost" }
-  | { mode: "raw"; includeCacheRead?: boolean };
+export type Weighting = { mode: "cost" } | { mode: "raw"; includeCacheRead?: boolean };
 
 const DEFAULT_WEIGHTING: Weighting = { mode: "cost" };
 

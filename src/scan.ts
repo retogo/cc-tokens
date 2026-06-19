@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises";
-import type { TurnRecord } from "./types.ts";
 import type { ToolEvent } from "./attribute.ts";
 import { agentKindFromPath, parseLineFull } from "./parse.ts";
+import type { TurnRecord } from "./types.ts";
 
 export interface ScanResult {
   /** 全ファイルの assistant+usage レコード（サブエージェント含む。5h 集計用）。 */

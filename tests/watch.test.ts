@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import type { ScanResult } from "../src/scan.ts";
-import type { TurnRecord } from "../src/types.ts";
 import type { ToolEvent } from "../src/attribute.ts";
 import { pruneState } from "../src/render/watch.ts";
+import type { ScanResult } from "../src/scan.ts";
+import type { TurnRecord } from "../src/types.ts";
 
 function rec(ts: number): TurnRecord {
   return {

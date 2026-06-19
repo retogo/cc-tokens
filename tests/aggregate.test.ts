@@ -1,16 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import {
-  byHour,
-  byModel,
-  byProject,
-  bySession,
-  groupBy,
-} from "../src/aggregate.ts";
+import { byHour, byModel, byProject, bySession, groupBy } from "../src/aggregate.ts";
 import type { TokenUsage, TurnRecord } from "../src/types.ts";
 
-function rec(
-  partial: Partial<TurnRecord> & { usage: TokenUsage },
-): TurnRecord {
+function rec(partial: Partial<TurnRecord> & { usage: TokenUsage }): TurnRecord {
   return {
     ts: Date.parse("2026-06-18T03:30:00.000Z"),
     model: "claude-opus-4-8",
@@ -28,9 +20,18 @@ function rec(
 }
 
 const records: TurnRecord[] = [
-  rec({ model: "claude-opus-4-8", usage: { input: 1000, output: 100, cacheCreation: 0, cacheRead: 0 } }),
-  rec({ model: "claude-opus-4-8", usage: { input: 0, output: 50, cacheCreation: 0, cacheRead: 0 } }),
-  rec({ model: "claude-sonnet-4-6", usage: { input: 100, output: 10, cacheCreation: 0, cacheRead: 0 } }),
+  rec({
+    model: "claude-opus-4-8",
+    usage: { input: 1000, output: 100, cacheCreation: 0, cacheRead: 0 },
+  }),
+  rec({
+    model: "claude-opus-4-8",
+    usage: { input: 0, output: 50, cacheCreation: 0, cacheRead: 0 },
+  }),
+  rec({
+    model: "claude-sonnet-4-6",
+    usage: { input: 100, output: 10, cacheCreation: 0, cacheRead: 0 },
+  }),
 ];
 
 describe("groupBy (テスト10)", () => {

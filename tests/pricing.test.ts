@@ -25,9 +25,7 @@ describe("pricing (テスト4)", () => {
   });
 
   test("モデル名は部分一致で解決（バージョン付きでも）", () => {
-    expect(priceFor("claude-haiku-4-5-20251001").input).toBe(
-      priceFor("haiku").input,
-    );
+    expect(priceFor("claude-haiku-4-5-20251001").input).toBe(priceFor("haiku").input);
     expect(priceFor("claude-sonnet-4-6").output).toBe(15);
   });
 
@@ -36,10 +34,7 @@ describe("pricing (テスト4)", () => {
   });
 
   test("weightedOf 既定(cost) は costOf と一致", () => {
-    expect(weightedOf(u, "claude-opus-4-8")).toBeCloseTo(
-      costOf(u, "claude-opus-4-8"),
-      10,
-    );
+    expect(weightedOf(u, "claude-opus-4-8")).toBeCloseTo(costOf(u, "claude-opus-4-8"), 10);
   });
 
   test("weightedOf raw は cache_read を除いた生トークン合計", () => {

@@ -89,11 +89,13 @@ export function buildSubagentDrill(subRecords: TurnRecord[]): DrillNode[] {
       label: run.label,
       tokens: run.tokens,
       turns: run.turns,
-      children: groupRecords(
-        run.recs,
-        (r) => r.agentId ?? "(unknown)",
-        shortAgent,
-      ).map((a) => ({ key: a.key, label: a.label, tokens: a.tokens, turns: a.turns, children: [] })),
+      children: groupRecords(run.recs, (r) => r.agentId ?? "(unknown)", shortAgent).map((a) => ({
+        key: a.key,
+        label: a.label,
+        tokens: a.tokens,
+        turns: a.turns,
+        children: [],
+      })),
     }));
     nodes.push({
       key: "Workflow",
@@ -105,11 +107,13 @@ export function buildSubagentDrill(subRecords: TurnRecord[]): DrillNode[] {
   }
 
   if (taskRecs.length) {
-    const agents = groupRecords(
-      taskRecs,
-      (r) => r.agentId ?? "(unknown)",
-      shortAgent,
-    ).map((a) => ({ key: a.key, label: a.label, tokens: a.tokens, turns: a.turns, children: [] }));
+    const agents = groupRecords(taskRecs, (r) => r.agentId ?? "(unknown)", shortAgent).map((a) => ({
+      key: a.key,
+      label: a.label,
+      tokens: a.tokens,
+      turns: a.turns,
+      children: [],
+    }));
     nodes.push({
       key: "Agent",
       label: "Agent",

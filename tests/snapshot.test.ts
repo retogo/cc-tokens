@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { Scanner } from "../src/scan.ts";
-import { buildSnapshot, rangeStart } from "../src/snapshot.ts";
 import { DEFAULTS } from "../src/config.ts";
 import { parseOfficialUsage } from "../src/official.ts";
 import { renderBlockStatus } from "../src/render/report.ts";
+import { Scanner } from "../src/scan.ts";
+import { buildSnapshot, rangeStart } from "../src/snapshot.ts";
 
 const FIX = join(import.meta.dir, "..", "fixtures", "projects");
 const NOW = Date.parse("2026-06-18T00:02:00.000Z"); // fixture 群の直後（5h 以内）

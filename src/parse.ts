@@ -64,6 +64,10 @@ function num(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+
 /** tool_result.content の文字数（文字列 or 構造化どちらも計測）。 */
 function resultChars(content: unknown): number {
   if (typeof content === "string") return content.length;
@@ -80,26 +84,26 @@ export function parseLineFull(line: string, filePath: string): ParsedLine {
   const trimmed = line.trim();
   if (!trimmed) return EMPTY;
 
-  let obj: any;
+  let raw: unknown;
   try {
-    obj = JSON.parse(trimmed);
+    raw = JSON.parse(trimmed);
   } catch {
     return EMPTY;
   }
-  if (!obj || typeof obj !== "object") return EMPTY;
+  if (!isRecord(raw)) return EMPTY;
+  const obj = raw;
 
-  const msg = obj.message;
-  const content: any[] = Array.isArray(msg?.content) ? msg.content : [];
+  const msg = isRecord(obj.message) ? obj.message : null;
+  const content: unknown[] = msg && Array.isArray(msg.content) ? msg.content : [];
 
-  const lineTsRaw =
-    typeof obj.timestamp === "string" ? Date.parse(obj.timestamp) : NaN;
+  const lineTsRaw = typeof obj.timestamp === "string" ? Date.parse(obj.timestamp) : NaN;
   const lineTs = Number.isNaN(lineTsRaw) ? null : lineTsRaw;
 
   let title: SessionTitleEvent | null = null;
   if (obj.type === "custom-title" || obj.type === "ai-title") {
     const sid = typeof obj.sessionId === "string" ? obj.sessionId : "";
-    const raw = obj.type === "custom-title" ? obj.customTitle : obj.aiTitle;
-    const text = typeof raw === "string" ? raw.trim() : "";
+    const titleRaw = obj.type === "custom-title" ? obj.customTitle : obj.aiTitle;
+    const text = typeof titleRaw === "string" ? titleRaw.trim() : "";
     if (sid && text) {
       title = { sessionId: sid, kind: obj.type === "custom-title" ? "custom" : "ai", title: text };
     }
@@ -108,7 +112,7 @@ export function parseLineFull(line: string, filePath: string): ParsedLine {
   const toolUses: ToolUseRef[] = [];
   const toolResults: ToolResultRef[] = [];
   for (const block of content) {
-    if (!block || typeof block !== "object") continue;
+    if (!isRecord(block)) continue;
     if (block.type === "tool_use" && typeof block.name === "string") {
       toolUses.push({ id: String(block.id ?? ""), name: block.name });
     } else if (block.type === "tool_result") {
@@ -120,31 +124,29 @@ export function parseLineFull(line: string, filePath: string): ParsedLine {
   }
 
   let record: TurnRecord | null = null;
-  if (obj.type === "assistant" && msg && msg.usage && lineTs !== null) {
+  if (obj.type === "assistant" && msg && isRecord(msg.usage) && lineTs !== null) {
     const usage = msg.usage;
-    {
-      const agentKind = agentKindFromPath(filePath);
-      const ids = subagentIdsFromPath(filePath);
-      record = {
-        ts: lineTs,
-        model: typeof msg.model === "string" ? msg.model : "unknown",
-        sessionId: typeof obj.sessionId === "string" ? obj.sessionId : "",
-        project: typeof obj.cwd === "string" ? obj.cwd : "",
-        gitBranch: typeof obj.gitBranch === "string" ? obj.gitBranch : "",
-        usage: {
-          input: num(usage.input_tokens),
-          output: num(usage.output_tokens),
-          cacheCreation: num(usage.cache_creation_input_tokens),
-          cacheRead: num(usage.cache_read_input_tokens),
-        },
-        toolsInvoked: toolUses.map((t) => t.name),
-        isSidechain: obj.isSidechain === true || agentKind !== null,
-        agentKind,
-        workflowId: ids.workflowId,
-        agentId: ids.agentId ?? (typeof obj.agentId === "string" ? `agent-${obj.agentId}` : null),
-        requestId: typeof obj.requestId === "string" ? obj.requestId : null,
-      };
-    }
+    const agentKind = agentKindFromPath(filePath);
+    const ids = subagentIdsFromPath(filePath);
+    record = {
+      ts: lineTs,
+      model: typeof msg.model === "string" ? msg.model : "unknown",
+      sessionId: typeof obj.sessionId === "string" ? obj.sessionId : "",
+      project: typeof obj.cwd === "string" ? obj.cwd : "",
+      gitBranch: typeof obj.gitBranch === "string" ? obj.gitBranch : "",
+      usage: {
+        input: num(usage.input_tokens),
+        output: num(usage.output_tokens),
+        cacheCreation: num(usage.cache_creation_input_tokens),
+        cacheRead: num(usage.cache_read_input_tokens),
+      },
+      toolsInvoked: toolUses.map((t) => t.name),
+      isSidechain: obj.isSidechain === true || agentKind !== null,
+      agentKind,
+      workflowId: ids.workflowId,
+      agentId: ids.agentId ?? (typeof obj.agentId === "string" ? `agent-${obj.agentId}` : null),
+      requestId: typeof obj.requestId === "string" ? obj.requestId : null,
+    };
   }
 
   return { record, toolUses, toolResults, lineTs, title };

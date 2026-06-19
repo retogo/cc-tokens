@@ -1,5 +1,5 @@
-import type { PriceOverrides, Weighting } from "./pricing.ts";
 import { configPath } from "./paths.ts";
+import type { PriceOverrides, Weighting } from "./pricing.ts";
 
 export interface Config {
   /** 加重指標（既定は生トークン）。 */

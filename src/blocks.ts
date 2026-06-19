@@ -1,6 +1,6 @@
-import type { BurnRate, Projection, TurnRecord } from "./types.ts";
 import type { PriceOverrides, Weighting } from "./pricing.ts";
 import { weightedOf } from "./pricing.ts";
+import type { BurnRate, Projection, TurnRecord } from "./types.ts";
 
 export const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
 
