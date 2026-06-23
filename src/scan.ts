@@ -38,6 +38,11 @@ export class Scanner {
   private offsets = new Map<string, number>();
   // sessionId → {custom?, ai?}。表示時は custom > ai で解決する（途中で custom が来たら昇格）。
   private titles = new Map<string, { custom?: string; ai?: string }>();
+  // 計上済みメッセージ（message.id、無ければ requestId）。Claude Code は 1 メッセージを
+  // content block ごとに別行へ書き全行に同じ usage を載せるため、これで usage の多重計上を防ぐ。
+  // resume / 再出力でファイルを跨いだ複製も同じ id で弾く。poll を跨いで効かせる必要があるので
+  // インスタンスに保持する（5h あたり数百件程度で増分は無視できる）。
+  private seenMessages = new Set<string>();
 
   constructor(private readonly root: string) {}
 
@@ -105,7 +110,17 @@ export class Scanner {
     for (const line of consumed.split("\n")) {
       if (!line) continue;
       const parsed = parseLineFull(line, path);
-      if (parsed.record) acc.records.push(parsed.record);
+      if (parsed.record) {
+        // usage は message 単位で 1 回だけ。tool I/O（下の toolEvents 収集）は行ごとに別ブロックなので
+        // dedup せず全行から拾う。id が取れない行のみフォールバックで毎回計上する。
+        const key = parsed.record.messageId ?? parsed.record.requestId;
+        if (key === null) {
+          acc.records.push(parsed.record);
+        } else if (!this.seenMessages.has(key)) {
+          this.seenMessages.add(key);
+          acc.records.push(parsed.record);
+        }
+      }
       // 直接ツール帰属はメインセッションのみ（サブは records 側で実測）。
       // サブエージェント由来は agent 単位のツール推定用に subagentToolEvents へ分けて保持。
       // record 側が lineTs !== null を必須としているのに合わせ、timestamp 不在行は除外する

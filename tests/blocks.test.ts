@@ -25,6 +25,7 @@ function rec(offsetMs: number, raw: number): TurnRecord {
     workflowId: null,
     agentId: null,
     requestId: null,
+    messageId: null,
   };
 }
 

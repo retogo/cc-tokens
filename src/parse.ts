@@ -152,6 +152,7 @@ export function parseLineFull(line: string, filePath: string): ParsedLine {
       workflowId: ids.workflowId,
       agentId: ids.agentId,
       requestId: typeof obj.requestId === "string" ? obj.requestId : null,
+      messageId: typeof msg.id === "string" ? msg.id : null,
     };
   }
 

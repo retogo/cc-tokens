@@ -15,6 +15,7 @@ function rec(partial: Partial<TurnRecord> & { usage: TokenUsage }): TurnRecord {
     workflowId: null,
     agentId: null,
     requestId: null,
+    messageId: null,
     ...partial,
   };
 }

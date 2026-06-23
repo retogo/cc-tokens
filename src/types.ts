@@ -38,6 +38,11 @@ export interface TurnRecord {
   /** エージェント ID（`agent-<hash>` 由来。メインは null）。 */
   agentId: string | null;
   requestId: string | null;
+  /**
+   * message.id（API レスポンス ID）。Claude Code は 1 メッセージを content block ごとに
+   * 別行へ書き、全行に同じ usage を載せるため、これをキーに usage を 1 回だけ計上する。
+   */
+  messageId: string | null;
 }
 
 /** 5h ブロック（ローリングウィンドウの近似単位）。 */

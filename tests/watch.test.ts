@@ -18,6 +18,7 @@ function rec(ts: number): TurnRecord {
     workflowId: null,
     agentId: null,
     requestId: null,
+    messageId: null,
   };
 }
 

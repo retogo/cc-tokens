@@ -49,6 +49,13 @@ describe("parseLine (テスト1: assistant+usage の抽出)", () => {
     expect(r!.agentKind).toBeNull();
     expect(r!.requestId).toBe("req_1");
   });
+
+  test("message.id を messageId として抽出する（usage 重複排除のキー）", () => {
+    const line = assistantLine.replace('"role":"assistant"', '"role":"assistant","id":"msg_abc"');
+    expect(parseLine(line, MAIN_PATH)!.messageId).toBe("msg_abc");
+    // message.id が無ければ null
+    expect(parseLine(assistantLine, MAIN_PATH)!.messageId).toBeNull();
+  });
 });
 
 describe("パス由来の種別とフォールバック (テスト3)", () => {

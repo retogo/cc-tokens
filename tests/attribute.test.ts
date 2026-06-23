@@ -32,6 +32,7 @@ function subRec(
     workflowId,
     agentId,
     requestId: null,
+    messageId: null,
   };
 }
 

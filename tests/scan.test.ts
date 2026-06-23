@@ -201,3 +201,116 @@ describe("Scanner seed + poll (テスト12)", () => {
     expect(subEvs.every((e) => e.workflowId === "wf-sub-1")).toBe(true);
   });
 });
+
+// Claude Code は 1 メッセージを content block ごとに別行へ書き、全行に同じ usage を載せる。
+// message.id をキーに usage を 1 回だけ計上する（tool_use は別ブロックなので全行収集する）。
+function blockLine(opts: {
+  ts: string;
+  out: number;
+  msgId: string;
+  block: { type: "thinking" } | { type: "text" } | { type: "tool_use"; name: string; id: string };
+  sub?: boolean;
+}): string {
+  const c =
+    opts.block.type === "tool_use"
+      ? { type: "tool_use", name: opts.block.name, id: opts.block.id }
+      : { type: opts.block.type, text: "x" };
+  return JSON.stringify({
+    type: "assistant",
+    message: {
+      model: "claude-opus-4-8",
+      id: opts.msgId,
+      content: [c],
+      usage: {
+        input_tokens: 100,
+        output_tokens: opts.out,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
+    },
+    timestamp: opts.ts,
+    sessionId: "s",
+    cwd: "/p",
+    isSidechain: opts.sub === true,
+  });
+}
+
+describe("message.id による usage の重複排除（content block 分割行の多重計上を防ぐ）", () => {
+  test("同一 message.id の複数行は usage を 1 回だけ計上し、tool_use は全行から収集する", async () => {
+    const sc = new Scanner(join(root, "projects"));
+    const proj = join(root, "projects", "-dedup");
+    mkdirSync(proj, { recursive: true });
+    const f = join(proj, "s.jsonl");
+    const ts = "2026-06-18T01:00:00.000Z";
+    // 1 メッセージ = thinking + tool_use(Read) + tool_use(Bash) の 3 行。全行 usage 同一。
+    writeFileSync(
+      f,
+      `${blockLine({ ts, out: 777, msgId: "msg_dd", block: { type: "thinking" } })}\n` +
+        `${blockLine({ ts, out: 777, msgId: "msg_dd", block: { type: "tool_use", name: "Read", id: "r1" } })}\n` +
+        `${blockLine({ ts, out: 777, msgId: "msg_dd", block: { type: "tool_use", name: "Bash", id: "b1" } })}\n`,
+    );
+    const r = await sc.seed();
+    // usage は 1 メッセージ分のみ（3 重計上しない）
+    const mine = r.records.filter((x) => x.usage.output === 777);
+    expect(mine).toHaveLength(1);
+    // tool_use は両方とも toolEvents に残る
+    const toolNames = r.toolEvents.flatMap((e) => e.uses.map((u) => u.name));
+    expect(toolNames).toContain("Read");
+    expect(toolNames).toContain("Bash");
+  });
+
+  test("dedup は poll を跨いで効く（後続 poll で同 message.id が追記されても二重計上しない）", async () => {
+    const sc = new Scanner(join(root, "projects"));
+    const proj = join(root, "projects", "-dedup-poll");
+    mkdirSync(proj, { recursive: true });
+    const f = join(proj, "s.jsonl");
+    const ts = "2026-06-18T02:00:00.000Z";
+    writeFileSync(
+      f,
+      `${blockLine({ ts, out: 888, msgId: "msg_pp", block: { type: "thinking" } })}\n`,
+    );
+    const r1 = await sc.seed();
+    expect(r1.records.filter((x) => x.usage.output === 888)).toHaveLength(1);
+    // 同じメッセージの後続 content block が後から追記される
+    appendFileSync(
+      f,
+      `${blockLine({ ts, out: 888, msgId: "msg_pp", block: { type: "tool_use", name: "Grep", id: "g1" } })}\n`,
+    );
+    const r2 = await sc.poll();
+    // usage は計上しない（既出 message.id）
+    expect(r2.records.filter((x) => x.usage.output === 888)).toHaveLength(0);
+    // tool_use は拾う
+    expect(r2.toolEvents.flatMap((e) => e.uses.map((u) => u.name))).toContain("Grep");
+  });
+
+  test("message.id が無い行は dedup しない（usage 同一でも別レコード扱い・既存挙動）", async () => {
+    const sc = new Scanner(join(root, "projects"));
+    const proj = join(root, "projects", "-dedup-noid");
+    mkdirSync(proj, { recursive: true });
+    const f = join(proj, "s.jsonl");
+    // assistant() ヘルパは message.id を持たない
+    writeFileSync(
+      f,
+      `${assistant("2026-06-18T03:00:00.000Z", 555, "Read")}\n` +
+        `${assistant("2026-06-18T03:00:01.000Z", 555, "Bash")}\n`,
+    );
+    const r = await sc.seed();
+    expect(r.records.filter((x) => x.usage.output === 555)).toHaveLength(2);
+  });
+
+  test("サブエージェントの実測 usage も message.id 単位で 1 回だけ計上する", async () => {
+    const sc = new Scanner(join(root, "projects"));
+    const subDir = join(root, "projects", "-dedup-sub", "s", "subagents", "workflows", "wf-dd");
+    mkdirSync(subDir, { recursive: true });
+    const ts = "2026-06-18T04:00:00.000Z";
+    writeFileSync(
+      join(subDir, "agent-z.jsonl"),
+      `${blockLine({ ts, out: 333, msgId: "msg_sub", block: { type: "text" }, sub: true })}\n` +
+        `${blockLine({ ts, out: 333, msgId: "msg_sub", block: { type: "tool_use", name: "Read", id: "s1" }, sub: true })}\n`,
+    );
+    const r = await sc.seed();
+    expect(
+      r.records.filter((x) => x.agentKind === "workflow" && x.usage.output === 333),
+    ).toHaveLength(1);
+  });
+});

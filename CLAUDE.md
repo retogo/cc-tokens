@@ -32,8 +32,8 @@ official.ts ┘                                                   ↑
 pricing.ts ────────────────────────────────────────────────────┘
 ```
 
-- **`parse.ts`**: JSONL 1 行を `TurnRecord` に正規化。assistant かつ `usage` を持つ行のみ計上。ファイルパスから `agentKind`（`task` / `workflow` / `null`）と `workflowId` / `agentId` を導出（`subagents/workflows/<id>/agent-<hash>.jsonl` 等のパス規約に依存）。
-- **`scan.ts`**: `Scanner` クラスがバイトオフセットを記憶した**増分 tail**。`seed()` で初回走査（`sinceMs` で時間窓フィルタ）、`poll()` で追記分のみ。**改行で終わらない途中行は確定するまで消費しない**（二重計上回避）。サイズが縮んだら切り詰めとみなし先頭から再読込。
+- **`parse.ts`**: JSONL 1 行を `TurnRecord` に正規化。assistant かつ `usage` を持つ行のみ計上。`message.id` を `messageId` として取り出す（後段の重複排除キー）。ファイルパスから `agentKind`（`task` / `workflow` / `null`）と `workflowId` / `agentId` を導出（`subagents/workflows/<id>/agent-<hash>.jsonl` 等のパス規約に依存）。
+- **`scan.ts`**: `Scanner` クラスがバイトオフセットを記憶した**増分 tail**。`seed()` で初回走査（`sinceMs` で時間窓フィルタ）、`poll()` で追記分のみ。**改行で終わらない途中行は確定するまで消費しない**（二重計上回避）。サイズが縮んだら切り詰めとみなし先頭から再読込。**`usage` は `messageId`（無ければ `requestId`）単位で 1 回だけ計上する**: Claude Code は 1 メッセージを content block（thinking / text / 各 tool_use）ごとに別行へ書き、全行に同じ `usage` を載せるため、行ごとに数えると content block 数だけ多重計上になる（実測で 2.9〜3.9 倍）。dedup は `seenMessages` セットで `poll` を跨いで・ファイルを跨いで（resume / 再出力の複製も）効かせる。**ツール I/O（`toolEvents` / `subagentToolEvents`）は dedup せず全行から拾う**（各 tool_use は別行に 1 回ずつ）。
 - **`attribute.ts`**: ツール別帰属の中核。**ハイブリッド集計**で、`=`（実測）= Agent(Task ツール)/Workflow のサブエージェント `agent-*.jsonl` の `usage` 合計、`~`（推定）= 直接ツール（Read/Bash/Edit など）の `tool_result` 文字数 ÷ `CHARS_PER_TOKEN`（既定 4）。**サブエージェント内部のツール呼び出しは推定から除外**して二重計上を避ける。換算係数の差し替え口は `CHARS_PER_TOKEN` に集約。表示ラベルは `Task` ツールを `Agent` と表記する。
 - **`blocks.ts`**: 5h ウィンドウのバーンレート / 枯渇予測。ウィンドウ範囲は `[reset - 5h, now]`、`reset` は API の `resets_at`（取得時のみ）。**取得できない時は直近 5h を使い、リセット時刻はローカル近似しない**（README の制限通り）。
 - **`official.ts`**: `/api/oauth/usage` 取得。OAuth トークンは **macOS Keychain（`Claude Code-credentials`）優先、無ければ `~/.claude/.credentials.json`**。**自動リフレッシュはしない**（refresh token ローテーション / Keychain 書き戻しで本体ログインを壊すリスクを避けるため）。401 時はユーザーに `claude` を一度起動するよう案内する。
@@ -42,7 +42,7 @@ pricing.ts ───────────────────────
 
 ### トークン帰属の前提
 
-- ターン単位の `usage` は正確、ツール単位は不正確、という非対称が前提。`=` と `~` を画面表示でも区別する。
+- ターン（= `messageId` 単位、`scan.ts` で重複排除済み）の `usage` は正確、ツール単位は不正確、という非対称が前提。`=` と `~` を画面表示でも区別する。
 - **セッション / プロジェクト / モデル / 時間帯の集計は `usage` 実測なので正確**。
 - ツール内訳の `--expand`（watch は `Ctrl-O`）で展開する Workflow→実行→agent / Agent→agent ドリルダウンは `workflowId` / `agentId` で集計した実測値。
 
