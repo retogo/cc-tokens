@@ -241,11 +241,19 @@ export async function watch(root: string, config: Config, opts: WatchOptions): P
   };
 
   rebuild();
+  // 再描画は固定 1Hz（Cumul tip の 1 秒点滅と Burn ▲▼ ticker のため）。
+  // データ poll は別 cadence で、設定 opts.intervalMs を経過したときだけ走らせる。
+  // これで「データは 5s ごとに更新したいが、視覚アニメーションは 1Hz で動かしたい」を両立する。
+  const REDRAW_MS = 1000;
+  let nextPollAt = Date.now() + opts.intervalMs;
   while (!stopped) {
-    await Bun.sleep(opts.intervalMs);
-    merge(state, await scanner.poll());
-    if (opts.official && Date.now() >= nextOfficialAt) {
-      await refreshOfficial();
+    await Bun.sleep(REDRAW_MS);
+    if (Date.now() >= nextPollAt) {
+      merge(state, await scanner.poll());
+      if (opts.official && Date.now() >= nextOfficialAt) {
+        await refreshOfficial();
+      }
+      nextPollAt = Date.now() + opts.intervalMs;
     }
     rebuild();
   }

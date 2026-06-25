@@ -15,6 +15,7 @@ export interface Config {
 export const DEFAULTS: Config = {
   // 既定はトークン基準（サブスク利用ではコスト$は目安に留め、主指標をトークンにする）。
   weighting: { mode: "raw" },
+  // データ更新の cadence。再描画自体は別途 1Hz で動くので、ここは "scanner.poll を回す頻度" の意味。
   intervalSec: 5,
   windowHours: 5,
   priceOverrides: {},

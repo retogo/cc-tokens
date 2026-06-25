@@ -132,7 +132,7 @@ export function renderBlockStatus(s: Snapshot, t?: Ticker): string {
   // 時間軸の "いつ高まったか" は Cumul の傾きで読める。
   if (s.hasActivity && s.cumul) {
     lines.push("");
-    for (const line of renderCumulChart(s.cumul)) lines.push(line);
+    for (const line of renderCumulChart(s.cumul, s.now)) lines.push(line);
   }
   return lines.join("\n");
 }
@@ -144,7 +144,7 @@ export function renderBlockStatus(s: Snapshot, t?: Ticker): string {
  * - 横軸: windowStart〜windowEnd（5h 全幅）、縦軸: 0〜100%
  * - 描画: braille で本物のポリライン（thick=true で 3 ドット幅にして実線らしく見せる）
  */
-function renderCumulChart(cumul: NonNullable<Snapshot["cumul"]>): string[] {
+function renderCumulChart(cumul: NonNullable<Snapshot["cumul"]>, now: number): string[] {
   if (cumul.past.length === 0) return [];
   const height = 6;
   // bodyWidth - 1 を「ウィンドウ時間数」で割り切れる値にすると、clock-hour 境界の col が
@@ -175,6 +175,28 @@ function renderCumulChart(cumul: NonNullable<Snapshot["cumul"]>): string[] {
   }
   const griddedBody = body.map((line) => overlayHourGrid(line, hourCols));
 
+  // 過去ラインの "tip"（= 現在時刻のポイント）を "白 ↔ グレー" で点滅させてライブカーソル化する。
+  // ANSI SGR 5（blink）に頼ると VSCode 内蔵 terminal 等で無視されるので、now を 1 秒粒度で
+  // 偶数秒/奇数秒に分けて装飾を切り替える方式（呼び出し側が 1Hz 以上で再描画する前提）。
+  // tip は past 配列の最終点 (xNow, cumulNow)。brailleChart の toSubX/toSubY と同じ式で
+  // セル座標を逆算し、その 1 セルの braille char をラップする（文字種は変えない）。
+  const tipPoint = cumul.past[cumul.past.length - 1];
+  if (tipPoint) {
+    const subW = 2 * bodyWidth;
+    const subH = 4 * height;
+    const tx = Math.max(0, Math.min(1, tipPoint.x));
+    const ty = Math.max(0, Math.min(1, tipPoint.y));
+    const tipCharCol = Math.floor(Math.round(tx * (subW - 1)) / 2);
+    const tipCharRow = Math.floor(Math.round((1 - ty) * (subH - 1)) / 4);
+    if (tipCharRow >= 0 && tipCharRow < height) {
+      const blinkOn = Math.floor(now / 1000) % 2 === 0;
+      // on: 装飾なし（既定色 = 白）/ off: dim（グレー）
+      const tipDecorate = blinkOn ? (s: string) => s : c.dim;
+      // biome-ignore lint/style/noNonNullAssertion: tipCharRow は範囲チェック済み
+      griddedBody[tipCharRow] = wrapCharAtCol(griddedBody[tipCharRow]!, tipCharCol, tipDecorate);
+    }
+  }
+
   // y 軸目盛: height=6 で 100/80/60/40/20/0 の 6 段。
   const ticks = ["100%", " 80%", " 60%", " 40%", " 20%", "  0%"];
   const label = padLabel("Cumul");
@@ -196,6 +218,39 @@ function renderCumulChart(cumul: NonNullable<Snapshot["cumul"]>): string[] {
   out.push(
     `  ${c.dim(blank)} ${c.dim("    ")}  ${c.dim(startStr + " ".repeat(padCount) + endStr)}`,
   );
+  return out;
+}
+
+/**
+ * body 行の特定 visible col にある 1 文字（元の文字はそのまま）を `decorate` で包む。
+ * ANSI escape は可視幅 0 として skip するので、装飾済みの行でも正しい列をヒットする。
+ * tip cell の braille char を点滅させたいだけのときに使う（文字を別物に置き換えないので
+ * グリフサイズが変わらず、線の太さ感が保たれる）。
+ */
+function wrapCharAtCol(line: string, col: number, decorate: (s: string) => string): string {
+  let visibleCol = 0;
+  let out = "";
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] === "\x1b") {
+      const end = line.indexOf("m", i);
+      if (end === -1) {
+        out += line.slice(i);
+        break;
+      }
+      out += line.slice(i, end + 1);
+      i = end + 1;
+      continue;
+    }
+    if (visibleCol === col) {
+      // biome-ignore lint/style/noNonNullAssertion: ループ範囲は line 内
+      out += decorate(line[i]!);
+    } else {
+      out += line[i];
+    }
+    visibleCol++;
+    i++;
+  }
   return out;
 }
 
