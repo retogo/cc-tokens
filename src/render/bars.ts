@@ -3,6 +3,8 @@
 const SPARK = "▁▂▃▄▅▆▇█";
 const FILL = "█";
 const EMPTY = "░";
+// 内訳テーブル用の軽量バー: 主シグナルは数値とパーセントなので、empty は最小の点で済ませる。
+const LIGHT_EMPTY = "·";
 
 /** トークン数を 12.3k / 1.25M に丸める。 */
 export function formatTokens(n: number): string {
@@ -32,6 +34,19 @@ export function bar(fraction: number, width: number): string {
   const f = Math.max(0, Math.min(1, fraction));
   const filled = Math.round(f * width);
   return FILL.repeat(filled) + EMPTY.repeat(width - filled);
+}
+
+/**
+ * 内訳テーブル用の軽量バー。filled / empty を分離して返すので、呼び出し側で
+ * 塗り部分だけ強調色を当てて空白部分は dim にできる（視覚的な階層を作るため）。
+ */
+export function barParts(fraction: number, width: number): { filled: string; empty: string } {
+  const f = Math.max(0, Math.min(1, fraction));
+  const filled = Math.round(f * width);
+  return {
+    filled: FILL.repeat(filled),
+    empty: LIGHT_EMPTY.repeat(width - filled),
+  };
 }
 
 /** 値配列を 8 段階のスパークラインへ。 */

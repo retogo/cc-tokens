@@ -228,11 +228,14 @@ export async function watch(root: string, config: Config, opts: WatchOptions): P
 
     const pos =
       lines.length > viewport
-        ? `  [${scroll + 1}-${Math.min(scroll + viewport, lines.length)}/${lines.length} ↑↓]`
+        ? ` · ${scroll + 1}-${Math.min(scroll + viewport, lines.length)}/${lines.length} ↑↓`
         : "";
-    const refreshHint = opts.official ? "  /  r: refresh API" : "";
+    const refreshHint = opts.official ? " · r refresh" : "";
+    const updated = new Date(lastUpdate).toLocaleTimeString();
+    const tick = `${opts.intervalMs / 1000}s`;
+    const sessionMode = showSessionIds ? "name" : "id";
     const footer = color.dim(
-      `Updated ${new Date(lastUpdate).toLocaleTimeString()}  /  every ${opts.intervalMs / 1000}s  /  Ctrl-O: expand  /  Ctrl-N: ${showSessionIds ? "name" : "id"}${refreshHint}${pos}  /  q: quit`,
+      `${updated} · ${tick} tick · ^O expand · ^N ${sessionMode}${refreshHint}${pos} · q quit`,
     );
     process.stdout.write(`${REDRAW + visible.join("\n")}\n${footer}`);
   };
