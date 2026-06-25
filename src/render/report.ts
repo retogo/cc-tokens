@@ -5,11 +5,13 @@ import type { BreakdownRow } from "../types.ts";
 import {
   bar,
   barParts,
+  brailleChart,
   color,
   formatDuration,
   formatTokens,
   formatUSD,
   gaugeColor,
+  type PolylineSeries,
   sparkline,
   type Ticker,
 } from "./bars.ts";
@@ -135,8 +137,109 @@ export function renderBlockStatus(s: Snapshot, t?: Ticker): string {
         lines.push(`  ${c.dim(padLabel("Trend"))} ${sparkline(s.spark)} ${c.dim("5h")}`);
       }
     }
+    // 累積 % チャート（5h ウィンドウ全幅。limit が取れたときだけ表示）。Trend との間に余白を 1 行入れる。
+    if (s.cumul) {
+      lines.push("");
+      for (const line of renderCumulChart(s.cumul)) lines.push(line);
+    }
   }
   return lines.join("\n");
+}
+
+/**
+ * 累積 % の折れ線チャートを Trend の直下に出す。
+ * - 過去（windowStart〜now、実測）: 太線・通常色で前面レイヤ
+ * - 予測（now〜windowEnd、burn10 線形外挿）: 細線・dim 色で背面レイヤ
+ * - 横軸: windowStart〜windowEnd（5h 全幅）、縦軸: 0〜100%
+ * - 描画: braille で本物のポリライン（thick=true で 3 ドット幅にして実線らしく見せる）
+ */
+function renderCumulChart(cumul: NonNullable<Snapshot["cumul"]>): string[] {
+  if (cumul.past.length === 0) return [];
+  const height = 6;
+  // bodyWidth - 1 を「ウィンドウ時間数」で割り切れる値にすると、clock-hour 境界の col が
+  // 丸めなしで等間隔になる。5h ウィンドウなら (bodyWidth-1) % 5 === 0 で OK → 51（時間あたり 10 列）。
+  const bodyWidth = 51;
+  const series: PolylineSeries[] = [
+    // past: 通常色（先頭 series が overlap セルで装飾を勝ち取る = 前面）
+    { points: cumul.past },
+  ];
+  if (cumul.prediction.length >= 2) {
+    series.push({ points: cumul.prediction, decorate: c.dim });
+  }
+  const body = brailleChart(series, bodyWidth, height);
+
+  // 1 時間ごとのグリッド: clock-aligned な hour 境界（windowStart より厳密に大きく、windowEnd 未満）。
+  // 背景レイヤとして body の空白セルにのみ "┊" を差し込む（chart line を上書きしない）。
+  const HOUR_MS = 3600_000;
+  const range = cumul.end - cumul.start;
+  const firstHour = Math.ceil(cumul.start / HOUR_MS) * HOUR_MS;
+  const hourCols = new Set<number>();
+  for (let ts = firstHour; ts < cumul.end; ts += HOUR_MS) {
+    const xFrac = (ts - cumul.start) / range;
+    if (xFrac <= 0 || xFrac >= 1) continue;
+    const col = Math.round(xFrac * (bodyWidth - 1));
+    // col=0 は y 軸 │ の真隣で `│┊` がダブル線に見えるので落とす。最右端も同様。
+    if (col <= 0 || col >= bodyWidth - 1) continue;
+    hourCols.add(col);
+  }
+  const griddedBody = body.map((line) => overlayHourGrid(line, hourCols));
+
+  // y 軸目盛: height=6 で 100/80/60/40/20/0 の 6 段。
+  const ticks = ["100%", " 80%", " 60%", " 40%", " 20%", "  0%"];
+  const label = padLabel("Cumul");
+  const blank = " ".repeat(label.length);
+  const out: string[] = [];
+  for (let i = 0; i < height; i++) {
+    const prefix = i === 0 ? c.dim(label) : c.dim(blank);
+    // biome-ignore lint/style/noNonNullAssertion: griddedBody と ticks は同じ height で揃えている
+    out.push(`  ${prefix} ${c.dim(ticks[i]!)} ${c.dim("│")}${griddedBody[i]!}`);
+  }
+  // 軸線: hour tick 位置で "─" を "┴" に置き換える。
+  let axis = "└";
+  for (let i = 0; i < bodyWidth; i++) axis += hourCols.has(i) ? "┴" : "─";
+  out.push(`  ${c.dim(blank)} ${c.dim("    ")} ${c.dim(axis)}`);
+  // x 軸ラベル: 両端の時刻のみ（途中の hour 値は ┴ で十分視覚化されている）。
+  const startStr = timeHHMM(cumul.start);
+  const endStr = timeHHMM(cumul.end);
+  const padCount = Math.max(0, bodyWidth - startStr.length - endStr.length);
+  out.push(
+    `  ${c.dim(blank)} ${c.dim("    ")}  ${c.dim(startStr + " ".repeat(padCount) + endStr)}`,
+  );
+  return out;
+}
+
+/**
+ * brailleChart の body 行に対し、hour grid の列位置に "┊" を差し込む（dim）。
+ * chart line の braille char や ANSI 装飾は壊さず、空白セルだけを置き換える。
+ * ANSI sequences は可視幅 0 として skip して visibleCol を進めない。
+ */
+function overlayHourGrid(line: string, cols: Set<number>): string {
+  if (cols.size === 0) return line;
+  let visibleCol = 0;
+  let out = "";
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] === "\x1b") {
+      // ANSI CSI sequence: ESC '[' ... 'm' まで丸ごとコピー
+      const end = line.indexOf("m", i);
+      if (end === -1) {
+        out += line.slice(i);
+        break;
+      }
+      out += line.slice(i, end + 1);
+      i = end + 1;
+      continue;
+    }
+    const ch = line[i];
+    if (ch === " " && cols.has(visibleCol)) {
+      out += c.dim("┊");
+    } else {
+      out += ch;
+    }
+    visibleCol++;
+    i++;
+  }
+  return out;
 }
 
 /** `usage` コマンド: 公式の 5h / 7d / スコープ別リミットを表示。 */

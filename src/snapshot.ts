@@ -95,6 +95,17 @@ export interface Snapshot {
   spark: number[];
   /** 直近10分を10秒幅×60個のバケットに分けた生トークン（watch 用、左スクロール表示）。 */
   sparkRecent: number[];
+  /**
+   * 累積使用率の折れ線データ。`past` は windowStart から now までの実測値、`prediction` は
+   * burn10 を線形外挿した将来予測（100% で折れる）。x,y は [0..1] 正規化（x: windowStart=0,
+   * windowEnd=1 / y: 0%=0, 100%=1）。effectiveLimit が無いと % に意味がないので null。
+   */
+  cumul: {
+    past: Array<{ x: number; y: number }>;
+    prediction: Array<{ x: number; y: number }>;
+    start: number;
+    end: number;
+  } | null;
   /** 公式 usage（取得できた場合）。 */
   official: OfficialUsage | null;
   /** 真のリセット時刻（API のみ。無ければ null）。 */
@@ -241,6 +252,54 @@ export function buildSnapshot(
       const buckets = 60;
       const bucketEnd = Math.floor(now / bucketMs) * bucketMs;
       return sparkBuckets(recs, bucketEnd - bucketMs * buckets, bucketEnd, buckets);
+    })(),
+    // 累積%の折れ線データ: 過去（実測）と予測（burn × 残り時間）を分けて持つ。
+    // 過去は now で打ち切るので、現在バケットの進行で過去ライン全体が縦シフトしない（旧実装の問題）。
+    // limit 不在では % が定義できないので null。
+    cumul: ((): Snapshot["cumul"] => {
+      if (effectiveLimit === null) return null;
+      const NBUCKETS = 48;
+      const fullBuckets = sparkBuckets(recs, windowStart, windowEnd, NBUCKETS);
+      // 各バケット末端での累積%
+      const cumulPct: number[] = [];
+      let sum = 0;
+      for (const v of fullBuckets) {
+        sum += v;
+        cumulPct.push(sum / effectiveLimit);
+      }
+      // now の正規化 x と、確定済みバケット数（floor）。windowEnd 以後でも安全にクランプ。
+      const xNow = Math.max(0, Math.min(1, (now - windowStart) / windowMs));
+      // 確定済み = "（i+1）番目のバケット末端が now 以下" を満たす i の最大値+1。雑に floor(xNow * N) で取る。
+      const completedBuckets = Math.max(0, Math.min(NBUCKETS, Math.floor(xNow * NBUCKETS)));
+      const cumulNow = usedRaw / effectiveLimit;
+
+      // 過去ライン: (0, 0) → 各完了バケット末端 → 最終点 (xNow, cumulNow)。
+      const past: Array<{ x: number; y: number }> = [{ x: 0, y: 0 }];
+      for (let i = 0; i < completedBuckets; i++) {
+        // biome-ignore lint/style/noNonNullAssertion: i < completedBuckets <= cumulPct.length
+        past.push({ x: (i + 1) / NBUCKETS, y: cumulPct[i]! });
+      }
+      past.push({ x: xNow, y: cumulNow });
+
+      // 予測ライン: burn10（≒ 直近 10 分平均）を残り時間に線形外挿。burn=0 や reset 通過後は無し。
+      const prediction: Array<{ x: number; y: number }> = [];
+      if (burn10.rawPerMin > 0 && xNow < 1 && windowEnd > now) {
+        const minutesRemaining = (windowEnd - now) / MIN;
+        const deltaY = (burn10.rawPerMin * minutesRemaining) / effectiveLimit;
+        const yEnd = cumulNow + deltaY;
+        prediction.push({ x: xNow, y: cumulNow });
+        if (yEnd > 1 && deltaY > 0) {
+          // 100% 到達時刻で折る
+          const fractionToHit = (1 - cumulNow) / deltaY;
+          const xHit = Math.min(1, xNow + (1 - xNow) * fractionToHit);
+          prediction.push({ x: xHit, y: 1 });
+          if (xHit < 1) prediction.push({ x: 1, y: 1 });
+        } else {
+          prediction.push({ x: 1, y: Math.max(0, yEnd) });
+        }
+      }
+
+      return { past, prediction, start: windowStart, end: windowEnd };
     })(),
     official,
     resetTs,
