@@ -78,6 +78,8 @@ export interface Snapshot {
   cost: number;
   /** ウィンドウ平均バーン。 */
   burnWindow: BurnRate;
+  /** 直近 1 分の瞬間バーン。スパイク検出用（"いま増えている？" を数値化）。 */
+  burn1m: BurnRate;
   burn10: BurnRate;
   burnHour: BurnRate;
   /**
@@ -91,10 +93,6 @@ export interface Snapshot {
   breakdowns: RangedBreakdowns;
   /** sessionId → 表示名（custom-title 優先、無ければ ai-title）。 */
   sessionTitles: Map<string, string>;
-  /** ウィンドウ開始〜now を48分割したバケット毎の生トークン（スパークライン用）。 */
-  spark: number[];
-  /** 直近10分を10秒幅×60個のバケットに分けた生トークン（watch 用、左スクロール表示）。 */
-  sparkRecent: number[];
   /**
    * 累積使用率の折れ線データ。`past` は windowStart から now までの実測値、`prediction` は
    * burn10 を線形外挿した将来予測（100% で折れる）。x,y は [0..1] 正規化（x: windowStart=0,
@@ -202,6 +200,7 @@ export function buildSnapshot(
     config.weighting,
     config.priceOverrides,
   );
+  const burn1m = burnRateOverWindow(recs, 1 * MIN, now, config.weighting, config.priceOverrides);
   const burn10 = burnRateOverWindow(recs, 10 * MIN, now, config.weighting, config.priceOverrides);
   const burnHour = burnRateOverWindow(recs, 60 * MIN, now, config.weighting, config.priceOverrides);
 
@@ -239,20 +238,13 @@ export function buildSnapshot(
     totals,
     cost: costSum(recs, config.priceOverrides),
     burnWindow,
+    burn1m,
     burn10,
     burnHour,
     budgetBurnPerMin,
     projection,
     breakdowns,
     sessionTitles: scan.sessionTitles,
-    spark: sparkBuckets(recs, windowStart, now, 48),
-    // バケット境界を絶対時刻（10秒粒度）に揃え、未完了バケットを含めないことで「ティックが進んでも形が変わらず、境界をまたいだ瞬間だけ左に1個ずれる」純粋な左スクロールを実現する。
-    sparkRecent: (() => {
-      const bucketMs = 10_000;
-      const buckets = 60;
-      const bucketEnd = Math.floor(now / bucketMs) * bucketMs;
-      return sparkBuckets(recs, bucketEnd - bucketMs * buckets, bucketEnd, buckets);
-    })(),
     // 累積%の折れ線データ: 過去（実測）と予測（burn × 残り時間）を分けて持つ。
     // 過去は now で打ち切るので、現在バケットの進行で過去ライン全体が縦シフトしない（旧実装の問題）。
     // limit 不在では % が定義できないので null。

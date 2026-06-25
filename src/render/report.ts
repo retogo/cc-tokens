@@ -12,7 +12,6 @@ import {
   formatUSD,
   gaugeColor,
   type PolylineSeries,
-  sparkline,
   type Ticker,
 } from "./bars.ts";
 
@@ -99,10 +98,13 @@ export function renderBlockStatus(s: Snapshot, t?: Ticker): string {
   // ── ペース系: バーン・目標・枯渇予測 ──
   lines.push("");
 
+  // 3 つの時間窓を 1 行に圧縮: 1m が "いまの瞬間" / 10m が安定したベース / 1h が長期。
+  // ▲▼ ticker を 1m に当てて、最も反応の速い数字に直接出る形にする。
+  const b1m = formatTokens(s.burn1m.rawPerMin);
   const b10 = formatTokens(s.burn10.rawPerMin);
   const bHr = formatTokens(s.burnHour.rawPerMin);
   lines.push(
-    `  ${c.dim(padLabel("Burn"))} ${c.cyan(tick(t, "burn10", s.burn10.rawPerMin, b10))} ${c.dim("tok/min")}${SEP}${c.dim(`1h avg ${bHr}`)}`,
+    `  ${c.dim(padLabel("Burn"))} ${c.cyan(tick(t, "burn1m", s.burn1m.rawPerMin, b1m))} ${c.dim("tok/min")}${SEP}${c.dim(`10m ${b10}`)}${SEP}${c.dim(`1h ${bHr}`)}`,
   );
 
   if (s.budgetBurnPerMin !== null) {
@@ -125,23 +127,12 @@ export function renderBlockStatus(s: Snapshot, t?: Ticker): string {
     }
   }
 
-  if (s.hasActivity) {
-    if (t) {
-      // watch モード: 直近10分
-      if (s.sparkRecent.length) {
-        lines.push(`  ${c.dim(padLabel("Trend"))} ${sparkline(s.sparkRecent)} ${c.dim("10m")}`);
-      }
-    } else {
-      // report モード: 5h全体
-      if (s.spark.length) {
-        lines.push(`  ${c.dim(padLabel("Trend"))} ${sparkline(s.spark)} ${c.dim("5h")}`);
-      }
-    }
-    // 累積 % チャート（5h ウィンドウ全幅。limit が取れたときだけ表示）。Trend との間に余白を 1 行入れる。
-    if (s.cumul) {
-      lines.push("");
-      for (const line of renderCumulChart(s.cumul)) lines.push(line);
-    }
+  // 累積 % チャート（5h ウィンドウ全幅。limit が取れたときだけ表示）。
+  // 旧 Trend スパークラインは廃止: 提供してた情報（"いま増えてるか"）は Burn 行の 1m + ▲▼ で代替、
+  // 時間軸の "いつ高まったか" は Cumul の傾きで読める。
+  if (s.hasActivity && s.cumul) {
+    lines.push("");
+    for (const line of renderCumulChart(s.cumul)) lines.push(line);
   }
   return lines.join("\n");
 }
