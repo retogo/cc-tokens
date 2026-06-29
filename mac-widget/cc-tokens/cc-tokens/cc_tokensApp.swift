@@ -12,16 +12,34 @@ import SwiftUI
 @main
 struct cc_tokensApp: App {
 
+    /// v1 はパスをハードコード (個人開発前提)。bun / cli.ts の置き場所が変わったらここを直す。
+    /// 将来は Settings UI または `bun build --compile` で .app に同梱する形に置き換える。
+    private static let daemonConfig = DaemonController.Config(
+        bunPath: "/Users/hirokigoto/.nix-profile/bin/bun",
+        cliPath: "/Users/hirokigoto/git/repos/github.com/retogo/cc-tokens/src/cli.ts",
+        emitPath: FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".cctok/snapshot.json").path,
+        logPath: FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".cctok/daemon.log").path
+    )
+
     /// SnapshotReader は App スコープで生存させる (パネル開閉で破棄しない)。
     @StateObject private var reader: SnapshotReader = {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let path = home.appendingPathComponent(".cctok/snapshot.json")
+        let path = URL(fileURLWithPath: daemonConfig.emitPath)
         return SnapshotReader(path: path)
+    }()
+
+    /// daemon の子プロセスもアプリと同じライフサイクルで管理する。
+    /// init では @StateObject に副作用を入れたくないので、別の closure 内で start() する。
+    @StateObject private var daemon: DaemonController = {
+        let controller = DaemonController(config: daemonConfig)
+        controller.start()
+        return controller
     }()
 
     var body: some Scene {
         MenuBarExtra {
-            ContentView(reader: reader)
+            ContentView(reader: reader, daemon: daemon)
         } label: {
             MenuBarLabel(state: reader.state)
         }

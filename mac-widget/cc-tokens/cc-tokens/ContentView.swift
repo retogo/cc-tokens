@@ -12,11 +12,13 @@ import AppKit
 
 struct ContentView: View {
     @ObservedObject var reader: SnapshotReader
+    @ObservedObject var daemon: DaemonController
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
             Divider()
+            daemonStatusBanner
             content
             Divider()
             footer
@@ -24,6 +26,34 @@ struct ContentView: View {
         .padding(14)
         .frame(width: 320)
         .onAppear { reader.refreshNow() }
+    }
+
+    /// 子プロセスとして起動した daemon が crashed なら専用バナー。
+    /// running / stopped は無音 (panel の age badge と %  値が「動いている」を示すので冗長を避ける)。
+    @ViewBuilder
+    private var daemonStatusBanner: some View {
+        if case .crashed(let reason) = daemon.status {
+            HStack(spacing: 8) {
+                Image(systemName: "bolt.trianglebadge.exclamationmark")
+                    .foregroundStyle(.red)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Daemon stopped")
+                        .font(.caption)
+                    Text(reason)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Spacer()
+                Button("Restart") { daemon.restart() }
+                    .controlSize(.small)
+                    .buttonStyle(.bordered)
+            }
+            .padding(8)
+            .background(Color.red.opacity(0.10))
+            .cornerRadius(6)
+        }
     }
 
     // MARK: header
@@ -338,5 +368,15 @@ struct ContentView: View {
 
 #Preview {
     // SnapshotReader の実 IO をプレビューで走らせないよう、preview 用のパスはあえて存在しないものを使う。
-    ContentView(reader: SnapshotReader(path: URL(fileURLWithPath: "/tmp/__cctok_preview_does_not_exist.json")))
+    // Preview では daemon を spawn したくないので start() を呼ばない controller を直接渡す。
+    let previewDaemon = DaemonController(config: DaemonController.Config(
+        bunPath: "/usr/bin/false",
+        cliPath: "/dev/null",
+        emitPath: "/tmp/__cctok_preview.json",
+        logPath: "/tmp/__cctok_preview.log"
+    ))
+    return ContentView(
+        reader: SnapshotReader(path: URL(fileURLWithPath: "/tmp/__cctok_preview_does_not_exist.json")),
+        daemon: previewDaemon
+    )
 }
