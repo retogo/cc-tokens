@@ -46,6 +46,23 @@ struct Snapshot: Decodable {
     let resetTs: Double?
     /// 予測に使う limit。API の utilization と現在消費から逆算。
     let effectiveLimit: Double?
+    /// 累積使用率の折れ線データ。effectiveLimit が無いと % に意味がないので null になる。
+    let cumul: CumulData?
+}
+
+/// cumul チャート用のデータ。
+/// x,y は [0..1] 正規化 (x: windowStart=0, windowEnd=1 / y: 0%=0, 100%=1)。
+/// start/end は epoch ms。表示時に x → 実時刻に逆変換する。
+struct CumulData: Decodable {
+    let past: [CumulPoint]
+    let prediction: [CumulPoint]
+    let start: Double
+    let end: Double
+}
+
+struct CumulPoint: Decodable, Hashable {
+    let x: Double
+    let y: Double
 }
 
 struct Totals: Decodable {

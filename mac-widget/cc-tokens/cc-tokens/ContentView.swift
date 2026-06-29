@@ -108,6 +108,12 @@ struct ContentView: View {
                     .tint(pctColor(pct))
             }
 
+            // 累積使用率のチャート (cumul が取れている時のみ)。
+            // effectiveLimit が無いと % に意味がないので TS 側で cumul は null になる。
+            if let cumul = snap.cumul {
+                CumulChartView(cumul: cumul)
+            }
+
             // バーン (1m raw)。
             HStack {
                 Image(systemName: "flame.fill")
