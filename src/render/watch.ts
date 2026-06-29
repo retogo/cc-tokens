@@ -1,12 +1,15 @@
 import type { Config } from "../config.ts";
-import type { OfficialUsage } from "../official.ts";
-import { fetchOfficialUsage, OfficialFetchError } from "../official.ts";
+import { createOfficialPoller } from "../official-poll.ts";
 import type { ScanResult } from "../scan.ts";
 import { Scanner } from "../scan.ts";
+// merge / pruneState は scan-state に集約（daemon と共有）。テスト互換のため pruneState を再 export する。
+import { merge, pruneState } from "../scan-state.ts";
 import { buildSnapshot } from "../snapshot.ts";
 import { color, Ticker } from "./bars.ts";
 import type { ReportOptions } from "./report.ts";
 import { renderReport } from "./report.ts";
+
+export { pruneState };
 
 // alternate screen 上に独自のビューポートを描く（vim/less と同じ仕組み）。
 // 内容は全行レンダリングし、画面に収まらない分は「アプリ内仮想スクロール」で見せる。
@@ -17,42 +20,11 @@ const REDRAW = "\x1b[H\x1b[J";
 const HIDE = "\x1b[?25l";
 const SHOW = "\x1b[?25h";
 
-function merge(into: ScanResult, more: ScanResult): void {
-  for (const r of more.records) into.records.push(r);
-  for (const e of more.toolEvents) into.toolEvents.push(e);
-  for (const e of more.subagentToolEvents) into.subagentToolEvents.push(e);
-  // sessionTitles は Scanner 内部で累積されており、`more` が常に最新スナップショット。空でなければ採用する。
-  if (more.sessionTitles.size > 0) into.sessionTitles = more.sessionTitles;
-}
-
-/**
- * 長時間 watch で state 配列が単調増加するのを抑える。
- * 表示は 5h ウィンドウのみなので、2× ウィンドウより古い要素は捨ててもどの算出にも影響しない。
- * scan.poll() は複数ファイルから append するため ts 単調増加は保証されず、
- * 頭だけ見て早期 return すると後続に潜む古い要素が永続滞留する。空配列のみスキップする。
- */
-export function pruneState(state: ScanResult, cutoffMs: number): void {
-  if (state.records.length > 0) {
-    state.records = state.records.filter((r) => r.ts >= cutoffMs);
-  }
-  if (state.toolEvents.length > 0) {
-    state.toolEvents = state.toolEvents.filter((e) => e.ts >= cutoffMs);
-  }
-  if (state.subagentToolEvents.length > 0) {
-    state.subagentToolEvents = state.subagentToolEvents.filter((e) => e.ts >= cutoffMs);
-  }
-}
-
 export interface WatchOptions extends ReportOptions {
   intervalMs: number;
   /** 公式 usage を取得して % / reset を表示・自動キャリブレーションするか。 */
   official: boolean;
 }
-
-/** API usage の通常再取得間隔（ミリ秒）。% は緩やかに動くので頻繁に叩かない。 */
-const OFFICIAL_REFRESH_MS = 180_000;
-/** 失敗時バックオフの上限（ミリ秒）。 */
-const OFFICIAL_BACKOFF_MAX_MS = 15 * 60_000;
 
 /**
  * ライブ監視ループ。seed 後、interval 毎に追記分を tail してスナップショットを再描画する。
@@ -120,8 +92,7 @@ export async function watch(root: string, config: Config, opts: WatchOptions): P
         if (opts.official && !refreshing) {
           refreshing = true;
           // backoff をリセットしてから fire-and-forget。完了で rebuild。
-          backoffMs = OFFICIAL_REFRESH_MS;
-          refreshOfficial().finally(() => {
+          poller.refreshManually().finally(() => {
             refreshing = false;
             rebuild();
           });
@@ -152,35 +123,11 @@ export async function watch(root: string, config: Config, opts: WatchOptions): P
   process.stdout.write(ALT_ON + HIDE);
 
   // API usage は別系統で定期取得（描画ループはブロックしない）。
-  // 一度取れた値は保持し、更新失敗(429等)では消さずに前回値＋注記を出す。
-  let official: OfficialUsage | null = null;
-  let officialError: string | null = null;
-  let nextOfficialAt = 0;
-  let backoffMs = OFFICIAL_REFRESH_MS;
+  // poller が前回値の保持・401 特例・指数バックオフを内蔵している（daemon と共通）。
+  const poller = createOfficialPoller({ enabled: opts.official });
   // 手動 refresh 中フラグ（多重押下で fetchOfficialUsage を並列起動しない）。
   let refreshing = false;
-  const refreshOfficial = async () => {
-    if (!opts.official) return;
-    try {
-      official = await fetchOfficialUsage(Date.now());
-      officialError = null;
-      backoffMs = OFFICIAL_REFRESH_MS;
-      nextOfficialAt = Date.now() + OFFICIAL_REFRESH_MS;
-    } catch (e) {
-      // official（前回値）は残す。理由を表示し、次回までバックオフ。
-      officialError = e instanceof Error ? e.message : String(e);
-      // 401（トークン期限切れ）は復旧がユーザ操作（claude 再起動）に依存するので backoff を伸ばさず、
-      // 短間隔で再試行することで再認証直後に古い表示を引きずらないようにする。
-      const is401 = e instanceof OfficialFetchError && e.status === 401;
-      const retry = e instanceof OfficialFetchError && e.retryAfterMs ? e.retryAfterMs : backoffMs;
-      if (!is401) {
-        backoffMs = Math.min(backoffMs * 2, OFFICIAL_BACKOFF_MAX_MS);
-      }
-      nextOfficialAt =
-        Date.now() + (is401 ? OFFICIAL_REFRESH_MS : Math.max(retry, OFFICIAL_REFRESH_MS));
-    }
-  };
-  await refreshOfficial();
+  await poller.refresh();
 
   // フレーム横断で数値の前回値を保持し、変化を株価ティッカー風に着色する。
   const ticker = new Ticker();
@@ -195,7 +142,7 @@ export async function watch(root: string, config: Config, opts: WatchOptions): P
     lastUpdate = now;
     // 2× ウィンドウより古い要素を捨て、長期稼働での state 配列の単調増加を抑える。
     pruneState(state, now - 2 * config.windowHours * 3600_000);
-    const snap = buildSnapshot(state, config, now, official);
+    const snap = buildSnapshot(state, config, now, poller.state.official);
     const body = renderReport(snap, snap.breakdowns, "current 5h window", {
       ...opts,
       ticker,
@@ -203,12 +150,14 @@ export async function watch(root: string, config: Config, opts: WatchOptions): P
       showSessionIds,
     });
     let apiNote = "";
-    if (opts.official && officialError) {
-      if (official) {
-        const ageMin = Math.floor((now - official.fetchedAt) / 60_000);
-        apiNote = color.dim(`\nAPI update failed (${officialError}) · last value ${ageMin}m ago`);
+    if (opts.official && poller.state.error) {
+      if (poller.state.official) {
+        const ageMin = Math.floor((now - poller.state.official.fetchedAt) / 60_000);
+        apiNote = color.dim(
+          `\nAPI update failed (${poller.state.error}) · last value ${ageMin}m ago`,
+        );
       } else {
-        apiNote = color.dim(`\nAPI unavailable: ${officialError}`);
+        apiNote = color.dim(`\nAPI unavailable: ${poller.state.error}`);
       }
     }
     lines = (body + apiNote).split("\n");
@@ -250,8 +199,8 @@ export async function watch(root: string, config: Config, opts: WatchOptions): P
     await Bun.sleep(REDRAW_MS);
     if (Date.now() >= nextPollAt) {
       merge(state, await scanner.poll());
-      if (opts.official && Date.now() >= nextOfficialAt) {
-        await refreshOfficial();
+      if (poller.shouldRefresh(Date.now())) {
+        await poller.refresh();
       }
       nextPollAt = Date.now() + opts.intervalMs;
     }
