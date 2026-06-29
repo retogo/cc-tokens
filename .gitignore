@@ -114,3 +114,18 @@ dist
 
 # macOS
 .DS_Store
+
+# Xcode / Swift（mac-widget 配下のビルド成果物・ユーザ固有設定）
+mac-widget/**/build/
+mac-widget/**/DerivedData/
+mac-widget/**/*.xcuserdatad/
+mac-widget/**/xcuserdata/
+mac-widget/**/*.xcuserstate
+mac-widget/**/xcshareddata/IDEWorkspaceChecks.plist
+mac-widget/**/xcshareddata/WorkspaceSettings.xcsettings
+mac-widget/**/Package.resolved
+mac-widget/**/.swiftpm/
+mac-widget/**/*.hmap
+mac-widget/**/*.ipa
+mac-widget/**/*.dSYM.zip
+mac-widget/**/*.dSYM
