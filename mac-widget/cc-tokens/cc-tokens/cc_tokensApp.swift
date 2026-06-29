@@ -38,7 +38,8 @@ private struct MenuBarLabel: View {
         switch state {
         case .ready(let payload, _):
             if let pct = payload.snapshot.pct {
-                Text("\(Int(pct.rounded()))%")
+                // pct は 0-1 の比率 (TS 側で utilization/100 してある)。表示は ×100 して整数 %。
+                Text("\(Int((pct * 100).rounded()))%")
             } else if payload.snapshot.hasActivity {
                 // local-only モード: % が無いので使用量だけ kilo 表記。
                 Text(kiloText(payload.snapshot.usedWeighted))
@@ -47,12 +48,12 @@ private struct MenuBarLabel: View {
             }
         case .waiting:
             Image(systemName: "ellipsis.circle")
-        case .error(let _, let last):
+        case .error(_, let last):
             // 直前 payload があれば残りの値を出しつつエラーアイコン重ねる。
             if let last, let pct = last.snapshot.pct {
                 HStack(spacing: 2) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                    Text("\(Int(pct.rounded()))%")
+                    Text("\(Int((pct * 100).rounded()))%")
                 }
             } else {
                 Image(systemName: "exclamationmark.triangle.fill")

@@ -101,9 +101,9 @@ struct ContentView: View {
                 }
             }
 
-            // 進捗バー (% が取れている時だけ表示)。
+            // 進捗バー (% が取れている時だけ表示)。pct は 0-1 比率なのでそのまま渡せる。
             if let pct = snap.pct {
-                ProgressView(value: min(max(pct / 100.0, 0), 1))
+                ProgressView(value: min(max(pct, 0), 1))
                     .progressViewStyle(.linear)
                     .tint(pctColor(pct))
             }
@@ -196,18 +196,20 @@ struct ContentView: View {
     // MARK: formatting
 
     /// 大きく見せる値: pct があれば「42%」、無ければ加重消費 (kilo)。
+    /// pct は 0-1 比率なので表示時に ×100 する。
     private func headlineText(_ snap: Snapshot) -> String {
         if let pct = snap.pct {
-            return "\(Int(pct.rounded()))%"
+            return "\(Int((pct * 100).rounded()))%"
         }
         return kiloText(snap.usedWeighted)
     }
 
+    /// しきい値は 0-1 比率で。60%=0.6 / 85%=0.85。
     private func pctColor(_ pct: Double) -> Color {
         switch pct {
-        case ..<60: .green
-        case ..<85: .yellow
-        default:    .red
+        case ..<0.60: .green
+        case ..<0.85: .yellow
+        default:      .red
         }
     }
 
