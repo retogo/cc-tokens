@@ -30,12 +30,31 @@ export type SerializedSnapshot = Omit<Snapshot, "sessionTitles"> & {
   sessionTitles: Record<string, string>;
 };
 
+/**
+ * 公式 API の取得状態。consumer (menu-bar app 等) が「% / reset が消えた理由」を
+ * 表示するために使う（429 / 401 / network エラー等）。schema_version 1 への optional 追加。
+ */
+export interface ApiStatus {
+  /** --official が有効か（false なら local-only 起動）。 */
+  enabled: boolean;
+  /** 直近 fetch が成功し、かつ value を保持しているか。enabled=false なら常に false。 */
+  ok: boolean;
+  /** 最終エラーメッセージ。成功時 / 未取得時は null。 */
+  error: string | null;
+  /** 直近成功 fetch の時刻（epoch ms）。一度も成功していなければ null。 */
+  last_fetch_at: number | null;
+  /** 次回 refresh 予定時刻（epoch ms）。enabled=false / 起動直後は null。 */
+  next_retry_at: number | null;
+}
+
 /** Swift 側（および将来の web 側）が読み取る固定構造。 */
 export interface EmitPayload {
   schema_version: typeof SCHEMA_VERSION;
   /** payload を作った時刻（ISO 8601）。snapshot.now（epoch ms）とは別系統。 */
   generated_at: string;
   snapshot: SerializedSnapshot;
+  /** 公式 API の取得状態（v1.1 で追加。古い consumer は無視するだけで壊れない）。 */
+  api_status: ApiStatus;
 }
 
 /** runDaemon が返す制御ハンドル。SIGINT 経路と外部呼び出し（テスト）の両方で停止する。 */
@@ -96,11 +115,44 @@ export function serializeSnapshot(snap: Snapshot): SerializedSnapshot {
 }
 
 /** EmitPayload を組み立てる。generated_at は `new Date(generatedAtMs).toISOString()`。 */
-export function buildEmitPayload(snap: Snapshot, generatedAtMs: number): EmitPayload {
+export function buildEmitPayload(
+  snap: Snapshot,
+  generatedAtMs: number,
+  apiStatus: ApiStatus,
+): EmitPayload {
   return {
     schema_version: SCHEMA_VERSION,
     generated_at: new Date(generatedAtMs).toISOString(),
     snapshot: serializeSnapshot(snap),
+    api_status: apiStatus,
+  };
+}
+
+/**
+ * OfficialPoller の state から ApiStatus を組み立てる。
+ * - enabled=false（--local 起動）の時は常に ok=false / 全 null。
+ * - error が出ていても official 値が残っていれば「stale だが使える」状態。
+ *   ok の判定は error === null && official !== null とする。
+ */
+export function buildApiStatus(
+  enabled: boolean,
+  poller: { state: { official: unknown; error: string | null; lastFetchAt: number | null; nextRetryAt: number | null } },
+): ApiStatus {
+  if (!enabled) {
+    return {
+      enabled: false,
+      ok: false,
+      error: null,
+      last_fetch_at: null,
+      next_retry_at: null,
+    };
+  }
+  return {
+    enabled: true,
+    ok: poller.state.error === null && poller.state.official !== null,
+    error: poller.state.error,
+    last_fetch_at: poller.state.lastFetchAt,
+    next_retry_at: poller.state.nextRetryAt,
   };
 }
 
@@ -198,8 +250,9 @@ export function runDaemon(
       pruneState(state, Date.now() - 2 * config.windowHours * 3600_000);
       const now = Date.now();
       const snap = buildSnapshot(state, config, now, poller.state.official);
+      const apiStatus = buildApiStatus(opts.official, poller);
       try {
-        await emitOnce(buildEmitPayload(snap, now), opts.emitPath);
+        await emitOnce(buildEmitPayload(snap, now, apiStatus), opts.emitPath);
         consecutiveEmitFailures = 0;
         lastEmitErrorMsg = null;
       } catch (e) {

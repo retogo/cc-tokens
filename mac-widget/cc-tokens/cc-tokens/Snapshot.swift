@@ -13,11 +13,37 @@ struct EmitPayload: Decodable {
     let schemaVersion: Int
     let generatedAt: String
     let snapshot: Snapshot
+    /// daemon v1.1 で追加された optional フィールド。古い payload を読む可能性に備えて optional。
+    let apiStatus: ApiStatus?
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
         case generatedAt = "generated_at"
         case snapshot
+        case apiStatus = "api_status"
+    }
+}
+
+/// 公式 API (/api/oauth/usage) の取得状態。429 / 401 / network エラーで
+/// % / reset / cumul が null に倒れた理由を panel に表示するために使う。
+struct ApiStatus: Decodable {
+    /// --official が有効か。--local 起動だと常に false。
+    let enabled: Bool
+    /// 直近 fetch が成功し、かつ value を保持しているか。
+    let ok: Bool
+    /// 最終エラーメッセージ。成功時 / 未取得時は null。
+    let error: String?
+    /// 直近成功 fetch の時刻 (epoch ms)。一度も成功していなければ null。
+    let lastFetchAt: Double?
+    /// 次回 refresh の予定時刻 (epoch ms)。enabled=false / 起動直後は null。
+    let nextRetryAt: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case enabled
+        case ok
+        case error
+        case lastFetchAt = "last_fetch_at"
+        case nextRetryAt = "next_retry_at"
     }
 }
 

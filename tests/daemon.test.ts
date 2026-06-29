@@ -4,7 +4,9 @@ import { stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULTS } from "../src/config.ts";
+import type { ApiStatus } from "../src/daemon.ts";
 import {
+  buildApiStatus,
   buildEmitPayload,
   emitOnce,
   runDaemon,
@@ -25,6 +27,15 @@ async function makeSnapshot() {
   const scan = await sc.seed();
   return buildSnapshot(scan, DEFAULTS, NOW, null);
 }
+
+/** テスト用の no-op ApiStatus（buildEmitPayload に渡す）。 */
+const DISABLED_API_STATUS: ApiStatus = {
+  enabled: false,
+  ok: false,
+  error: null,
+  last_fetch_at: null,
+  next_retry_at: null,
+};
 
 /** scratch ディレクトリを作って後始末する。 */
 function withTmp<T>(fn: (dir: string) => Promise<T>): Promise<T> {
@@ -75,7 +86,7 @@ describe("serializeSnapshot", () => {
   test("round-trips through JSON.stringify without losing sessionTitles", async () => {
     const snap = await makeSnapshot();
     snap.sessionTitles.set("sess-a", "Alpha");
-    const payload = buildEmitPayload(snap, Date.now());
+    const payload = buildEmitPayload(snap, Date.now(), DISABLED_API_STATUS);
     const text = JSON.stringify(payload);
     const decoded = JSON.parse(text);
     expect(decoded.snapshot.sessionTitles).toEqual({ "sess-a": "Alpha" });
@@ -87,7 +98,7 @@ describe("serializeSnapshot", () => {
     // SCHEMA_VERSION の bump 判断を促すゲートとして機能する。
     const snap = await makeSnapshot();
     snap.sessionTitles.set("sess-x", "Xray");
-    const payload = buildEmitPayload(snap, NOW);
+    const payload = buildEmitPayload(snap, NOW, DISABLED_API_STATUS);
     const decoded = JSON.parse(JSON.stringify(payload));
     // schema_version と generated_at の型保証
     expect(decoded.schema_version).toBe(1);
@@ -119,13 +130,78 @@ describe("serializeSnapshot", () => {
 });
 
 describe("buildEmitPayload", () => {
-  test("returns { schema_version: 1, generated_at: ISO string, snapshot }", async () => {
+  test("returns { schema_version: 1, generated_at: ISO string, snapshot, api_status }", async () => {
     const snap = await makeSnapshot();
     const generatedAtMs = Date.parse("2026-06-18T00:03:00.000Z");
-    const payload = buildEmitPayload(snap, generatedAtMs);
+    const payload = buildEmitPayload(snap, generatedAtMs, DISABLED_API_STATUS);
     expect(payload.schema_version).toBe(1);
     expect(payload.generated_at).toBe(new Date(generatedAtMs).toISOString());
     expect(payload.snapshot).toBeDefined();
+    expect(payload.api_status).toEqual(DISABLED_API_STATUS);
+  });
+});
+
+describe("buildApiStatus", () => {
+  test("enabled=false に倒すと常に ok=false / 全 null", () => {
+    const result = buildApiStatus(false, {
+      state: {
+        official: { fiveHour: { utilization: 50, resetsAt: 1 } },
+        error: "ignored when disabled",
+        lastFetchAt: 100,
+        nextRetryAt: 200,
+      },
+    });
+    expect(result).toEqual({
+      enabled: false,
+      ok: false,
+      error: null,
+      last_fetch_at: null,
+      next_retry_at: null,
+    });
+  });
+
+  test("enabled かつ official あり / error なし → ok=true", () => {
+    const result = buildApiStatus(true, {
+      state: {
+        official: { something: "value" },
+        error: null,
+        lastFetchAt: 1782707000000,
+        nextRetryAt: 1782707180000,
+      },
+    });
+    expect(result.enabled).toBe(true);
+    expect(result.ok).toBe(true);
+    expect(result.error).toBeNull();
+    expect(result.last_fetch_at).toBe(1782707000000);
+    expect(result.next_retry_at).toBe(1782707180000);
+  });
+
+  test("error 中でも前回 official を保持していれば error は出すが ok=false（stale 扱い）", () => {
+    const result = buildApiStatus(true, {
+      state: {
+        official: { something: "stale" },
+        error: "429 Too Many Requests",
+        lastFetchAt: 1782707000000,
+        nextRetryAt: 1782707300000,
+      },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("429 Too Many Requests");
+    expect(result.last_fetch_at).toBe(1782707000000);
+    expect(result.next_retry_at).toBe(1782707300000);
+  });
+
+  test("一度も成功していない（official=null）と ok=false / last_fetch_at=null", () => {
+    const result = buildApiStatus(true, {
+      state: {
+        official: null,
+        error: "401 Unauthorized",
+        lastFetchAt: null,
+        nextRetryAt: 1782707300000,
+      },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.last_fetch_at).toBeNull();
   });
 });
 
@@ -134,7 +210,7 @@ describe("emitOnce（atomic write: tmp → rename）", () => {
     await withTmp(async (dir) => {
       const path = join(dir, "snapshot.json");
       const snap = await makeSnapshot();
-      const payload = buildEmitPayload(snap, NOW);
+      const payload = buildEmitPayload(snap, NOW, DISABLED_API_STATUS);
       await emitOnce(payload, path);
       const file = Bun.file(path);
       expect(await file.exists()).toBe(true);
@@ -148,7 +224,7 @@ describe("emitOnce（atomic write: tmp → rename）", () => {
     await withTmp(async (dir) => {
       const path = join(dir, "snapshot.json");
       const snap = await makeSnapshot();
-      const payload = buildEmitPayload(snap, NOW);
+      const payload = buildEmitPayload(snap, NOW, DISABLED_API_STATUS);
       await emitOnce(payload, path);
       const tmp = Bun.file(`${path}.tmp`);
       expect(await tmp.exists()).toBe(false);
@@ -159,11 +235,11 @@ describe("emitOnce（atomic write: tmp → rename）", () => {
     await withTmp(async (dir) => {
       const path = join(dir, "snapshot.json");
       const snap = await makeSnapshot();
-      await emitOnce(buildEmitPayload(snap, NOW), path);
+      await emitOnce(buildEmitPayload(snap, NOW, DISABLED_API_STATUS), path);
       const first = await Bun.file(path).json();
       // 2 度目を別 generated_at で書き、上書きが効くこと
       const later = NOW + 60_000;
-      await emitOnce(buildEmitPayload(snap, later), path);
+      await emitOnce(buildEmitPayload(snap, later, DISABLED_API_STATUS), path);
       const second = await Bun.file(path).json();
       expect(second.generated_at).not.toBe(first.generated_at);
       expect(second.generated_at).toBe(new Date(later).toISOString());
@@ -175,7 +251,7 @@ describe("emitOnce（atomic write: tmp → rename）", () => {
     await withTmp(async (dir) => {
       const path = join(dir, "snapshot.json");
       const snap = await makeSnapshot();
-      await emitOnce(buildEmitPayload(snap, NOW), path);
+      await emitOnce(buildEmitPayload(snap, NOW, DISABLED_API_STATUS), path);
       const st = await stat(path);
       // 下位 9 bit のうち owner read/write のみが立っていること（0o600）
       const perm = st.mode & 0o777;

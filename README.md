@@ -77,11 +77,20 @@ they do not recognise rather than reject the payload.
     "burn10":      { "weightedPerMin": 0, "rawPerMin": 0 },
     "burnHour":    { "weightedPerMin": 0, "rawPerMin": 0 },
     "budgetBurnPerMin": null,
-    "projection":  null,                  // null | { runOutMs, runOutAt }
+    "projection":  null,                  // null | { exhaustionTs, projectedWeightedAtWindowEnd }
     "cumul":       null,                  // null | { past, prediction, start, end }
     "official":    null,                  // null | parsed /api/oauth/usage payload
     "breakdowns":  { /* by tool/model/session/project/hour + drill */ },
     "sessionTitles": { "sess-1": "Title One" }
+  },
+  "api_status": {
+    // Why % / reset / cumul might be null. Lets consumers show a "rate-limited"
+    // or "auth expired" banner instead of silently degrading to a numbers-only view.
+    "enabled":       true,                // false when started with --local
+    "ok":            false,               // true iff error == null && a value has been received
+    "error":         "HTTP 429",          // null when ok
+    "last_fetch_at": 1782698700000,       // null until the first successful fetch
+    "next_retry_at": 1782698900000        // null while idle / immediately ready
   }
 }
 ```

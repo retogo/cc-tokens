@@ -32,6 +32,30 @@ describe("createOfficialPoller", () => {
     await poller.refresh();
     expect(poller.state.official?.fetchedAt).toBe(1001);
     expect(poller.state.error).toBe(null);
+    // lastFetchAt / nextRetryAt も成功時に確定する
+    expect(poller.state.lastFetchAt).not.toBeNull();
+    expect(poller.state.nextRetryAt).not.toBeNull();
+  });
+
+  test("失敗時は lastFetchAt は更新せず nextRetryAt は未来時刻に倒す", async () => {
+    let n = 0;
+    const poller = createOfficialPoller({
+      enabled: true,
+      fetchNow: async () => {
+        n += 1;
+        if (n === 1) return ok(7777);
+        throw new OfficialFetchError("HTTP 500", 500);
+      },
+    });
+    await poller.refresh(); // 成功
+    const fetchedAtOnSuccess = poller.state.lastFetchAt;
+    expect(fetchedAtOnSuccess).not.toBeNull();
+    await poller.refresh(); // 失敗
+    // lastFetchAt は成功時のまま（失敗で更新しない）
+    expect(poller.state.lastFetchAt).toBe(fetchedAtOnSuccess);
+    // nextRetryAt は再試行予定時刻が入っている
+    expect(poller.state.nextRetryAt).not.toBeNull();
+    expect(poller.state.nextRetryAt!).toBeGreaterThan(Date.now() - 1);
   });
 
   test("失敗時は前回値を保持し error を立てる（official は消さない）", async () => {

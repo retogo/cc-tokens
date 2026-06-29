@@ -23,6 +23,10 @@ export interface OfficialPollerState {
   official: OfficialUsage | null;
   /** 直近失敗のエラーメッセージ。成功時は null にリセットされる。 */
   error: string | null;
+  /** 直近成功 fetch の時刻（epoch ms）。一度も成功していなければ null。 */
+  lastFetchAt: number | null;
+  /** 次回 refresh の予定時刻（epoch ms）。enabled=false / 起動直後は null（即時可）。 */
+  nextRetryAt: number | null;
 }
 
 /** poller の制御 API。watch / daemon の両方が同じインタフェースを使う。 */
@@ -58,7 +62,12 @@ export function createOfficialPoller(opts: {
   onError?: (msg: string) => void;
 }): OfficialPoller {
   const fetchFn = opts.fetchNow ?? (() => fetchOfficialUsage(Date.now()));
-  const state: OfficialPollerState = { official: null, error: null };
+  const state: OfficialPollerState = {
+    official: null,
+    error: null,
+    lastFetchAt: null,
+    nextRetryAt: null,
+  };
   let nextAt = 0;
   let backoffMs = OFFICIAL_BACKOFF_INITIAL_MS;
   // 並列 refresh を抑制するロック（手動 r キー連打や race を防ぐ）。
@@ -71,8 +80,10 @@ export function createOfficialPoller(opts: {
       try {
         state.official = await fetchFn();
         state.error = null;
+        state.lastFetchAt = Date.now();
         backoffMs = OFFICIAL_BACKOFF_INITIAL_MS;
         nextAt = Date.now() + OFFICIAL_REFRESH_MS;
+        state.nextRetryAt = nextAt;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         state.error = msg;
@@ -98,6 +109,7 @@ export function createOfficialPoller(opts: {
           wait = Math.max(backoffMs, OFFICIAL_MIN_GAP_MS);
         }
         nextAt = Date.now() + wait;
+        state.nextRetryAt = nextAt;
       } finally {
         inflight = null;
       }
@@ -112,6 +124,7 @@ export function createOfficialPoller(opts: {
     refreshManually: async () => {
       backoffMs = OFFICIAL_BACKOFF_INITIAL_MS;
       nextAt = 0;
+      state.nextRetryAt = null;
       await doRefresh();
     },
   };

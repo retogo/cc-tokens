@@ -68,17 +68,87 @@ struct ContentView: View {
         case .waiting(let path):
             setupGuide(path: path)
         case .ready(let payload, _):
-            snapshotBody(snap: payload.snapshot)
+            VStack(alignment: .leading, spacing: 10) {
+                apiStatusBanner(payload.apiStatus)
+                snapshotBody(snap: payload.snapshot)
+            }
         case .error(_, let last):
             if let last {
                 // エラー時も直前 snapshot は出す (連続性のため)。
-                snapshotBody(snap: last.snapshot)
+                VStack(alignment: .leading, spacing: 10) {
+                    apiStatusBanner(last.apiStatus)
+                    snapshotBody(snap: last.snapshot)
+                }
             } else {
                 Text("No snapshot available yet.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// API が rate-limited / 認証切れ / network 失敗等で % が消えた理由を見せる。
+    /// 表示条件: apiStatus.enabled かつ !ok。enabled=false (--local) 時は何も出さない。
+    @ViewBuilder
+    private func apiStatusBanner(_ apiStatus: ApiStatus?) -> some View {
+        if let status = apiStatus, status.enabled, !status.ok {
+            HStack(spacing: 8) {
+                Image(systemName: apiStatusIcon(status))
+                    .foregroundStyle(apiStatusTint(status))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(apiStatusHeadline(status))
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                    if let retryText = apiStatusRetryText(status) {
+                        Text(retryText)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+            }
+            .padding(8)
+            .background(apiStatusTint(status).opacity(0.12))
+            .cornerRadius(6)
+        }
+    }
+
+    private func apiStatusIcon(_ s: ApiStatus) -> String {
+        if let err = s.error {
+            if err.contains("401") { return "lock.trianglebadge.exclamationmark" }
+            if err.contains("429") { return "hourglass.tophalf.filled" }
+        }
+        return "antenna.radiowaves.left.and.right.slash"
+    }
+
+    private func apiStatusTint(_ s: ApiStatus) -> Color {
+        if let err = s.error, err.contains("401") { return .red }
+        return .orange
+    }
+
+    private func apiStatusHeadline(_ s: ApiStatus) -> String {
+        guard let err = s.error else {
+            // enabled だが error も official も無い = 起動直後で初回 fetch 前。
+            return "API: waiting for first fetch…"
+        }
+        if err.contains("401") { return "API auth expired — run `claude` to refresh" }
+        if err.contains("429") { return "API rate-limited" }
+        return "API unavailable"
+    }
+
+    /// next_retry_at が未来なら "retrying in <duration>" / "retrying at HH:mm" を返す。
+    /// 過ぎている場合は nil（次の poll で更新されるまで表示しない）。
+    private func apiStatusRetryText(_ s: ApiStatus) -> String? {
+        guard let nextMs = s.nextRetryAt else { return nil }
+        let nowMs = Date().timeIntervalSince1970 * 1000
+        let remainingMs = nextMs - nowMs
+        guard remainingMs > 0 else { return nil }
+        if remainingMs < 90_000 {
+            return "retrying in \(Int(remainingMs / 1000))s"
+        }
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return "retrying at \(f.string(from: Date(timeIntervalSince1970: nextMs / 1000)))"
     }
 
     private func snapshotBody(snap: Snapshot) -> some View {
