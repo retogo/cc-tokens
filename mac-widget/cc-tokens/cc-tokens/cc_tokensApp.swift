@@ -30,10 +30,12 @@ struct cc_tokensApp: App {
     }()
 
     /// daemon の子プロセスもアプリと同じライフサイクルで管理する。
-    /// init では @StateObject に副作用を入れたくないので、別の closure 内で start() する。
+    /// start() は次の runloop tick に倒す: @StateObject 初期化クロージャは
+    /// SwiftUI の AppGraph 構築中に走るので、その最中に @Published を変更しても
+    /// 観測者がいないとはいえ、Process spawn 含む副作用は AppGraph が確定した後で動かす。
     @StateObject private var daemon: DaemonController = {
         let controller = DaemonController(config: daemonConfig)
-        controller.start()
+        Task { @MainActor in controller.start() }
         return controller
     }()
 
