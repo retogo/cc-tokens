@@ -123,16 +123,20 @@ struct ContentView: View {
             }
             .font(.callout)
 
-            // 枯渇予測 (projection があれば)。
-            if let proj = snap.projection {
-                HStack {
-                    Image(systemName: "hourglass")
-                        .foregroundStyle(.secondary)
-                    Text("Runs out in \(durationText(proj.runOutMs))")
-                        .foregroundStyle(.secondary)
-                    Spacer()
+            // 枯渇予測 (projection.exhaustionTs があれば)。
+            // exhaustionTs は absolute epoch ms なので snap.now との差で残り時間を出す。
+            if let proj = snap.projection, let exhaustionTs = proj.exhaustionTs {
+                let remainingMs = exhaustionTs - snap.now
+                if remainingMs > 0 {
+                    HStack {
+                        Image(systemName: "hourglass")
+                            .foregroundStyle(.secondary)
+                        Text("Runs out in \(durationText(remainingMs))")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .font(.callout)
                 }
-                .font(.callout)
             }
 
             // トークン内訳 (小さく)。

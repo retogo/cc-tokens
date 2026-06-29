@@ -63,8 +63,8 @@ struct BurnRate: Decodable {
 
 /// 枯渇予測 (このバーンが続いた場合)。
 struct Projection: Decodable {
-    /// 枯渇までの残り (ms)。
-    let runOutMs: Double
-    /// 枯渇予測時刻 (epoch ms)。
-    let runOutAt: Double
+    /// 枯渇予測時刻 (epoch ms)。limit 未設定 or burn=0 の時は null。
+    let exhaustionTs: Double?
+    /// ウィンドウ終端での加重トークン着地予測。
+    let projectedWeightedAtWindowEnd: Double
 }
