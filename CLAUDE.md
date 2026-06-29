@@ -17,9 +17,10 @@ bun test tests/parse.test.ts          # 単一テストファイル
 bun test --test-name-pattern "..."    # テスト名フィルタ
 bun run typecheck                     # tsc --noEmit（厳格設定）
 bun run src/cli.ts <subcommand>       # CLI を直接実行
+bun run src/cli.ts daemon --emit <path>  # menubar app 向けに snapshot JSON を周期書き出し
 ```
 
-CLI のサブコマンド: `watch`（既定）/ `report` / `usage`。詳細は `README.md` と `src/cli.ts` の `HELP` を参照。
+CLI のサブコマンド: `watch`（既定）/ `report` / `usage` / `daemon`。詳細は `README.md` と `src/cli.ts` の `HELP` を参照。
 
 ## アーキテクチャの要点
 
@@ -28,16 +29,20 @@ CLI のサブコマンド: `watch`（既定）/ `report` / `usage`。詳細は `
 ```
 parse.ts ─┐
 scan.ts   ├─→ aggregate.ts / attribute.ts / blocks.ts ─→ snapshot.ts ─→ render/{bars,report,watch}.ts ─→ cli.ts
-official.ts ┘                                                   ↑
-pricing.ts ────────────────────────────────────────────────────┘
+official.ts ┘  scan-state.ts ─┐                            │  └────────→ daemon.ts ─────────────────────↑
+official-poll.ts ─────────────┘ (watch / daemon が共有する merge/prune と poller)
+pricing.ts ───────────────────────────────────────────────┘
 ```
 
 - **`parse.ts`**: JSONL 1 行を `TurnRecord` に正規化。assistant かつ `usage` を持つ行のみ計上。`message.id` を `messageId` として取り出す（後段の重複排除キー）。ファイルパスから `agentKind`（`task` / `workflow` / `null`）と `workflowId` / `agentId` を導出（`subagents/workflows/<id>/agent-<hash>.jsonl` 等のパス規約に依存）。
 - **`scan.ts`**: `Scanner` クラスがバイトオフセットを記憶した**増分 tail**。`seed()` で初回走査（`sinceMs` で時間窓フィルタ）、`poll()` で追記分のみ。**改行で終わらない途中行は確定するまで消費しない**（二重計上回避）。サイズが縮んだら切り詰めとみなし先頭から再読込。**`usage` は `messageId`（無ければ `requestId`）単位で 1 回だけ計上する**: Claude Code は 1 メッセージを content block（thinking / text / 各 tool_use）ごとに別行へ書き、全行に同じ `usage` を載せるため、行ごとに数えると content block 数だけ多重計上になる（実測で 2.9〜3.9 倍）。dedup は `seenMessages` セットで `poll` を跨いで・ファイルを跨いで（resume / 再出力の複製も）効かせる。**ツール I/O（`toolEvents` / `subagentToolEvents`）は dedup せず全行から拾う**（各 tool_use は別行に 1 回ずつ）。
+- **`scan-state.ts`**: `Scanner.poll()` 結果を `ScanResult` 単一インスタンスに統合する `merge` と、長期稼働 state の単調増加を抑える `pruneState` を提供。**watch / daemon の共通モジュール**で、`pruneState` は `sessionTitles` も active sessionId 集合に絞り込む（daemon は exit しないので titles 肥大対策が必要）。
 - **`attribute.ts`**: ツール別帰属の中核。**ハイブリッド集計**で、`=`（実測）= Agent(Task ツール)/Workflow のサブエージェント `agent-*.jsonl` の `usage` 合計、`~`（推定）= 直接ツール（Read/Bash/Edit など）の `tool_result` 文字数 ÷ `CHARS_PER_TOKEN`（既定 4）。**サブエージェント内部のツール呼び出しは推定から除外**して二重計上を避ける。換算係数の差し替え口は `CHARS_PER_TOKEN` に集約。表示ラベルは `Task` ツールを `Agent` と表記する。
 - **`blocks.ts`**: 5h ウィンドウのバーンレート / 枯渇予測。ウィンドウ範囲は `[reset - 5h, now]`、`reset` は API の `resets_at`（取得時のみ）。**取得できない時は直近 5h を使い、リセット時刻はローカル近似しない**（README の制限通り）。
 - **`official.ts`**: `/api/oauth/usage` 取得。OAuth トークンは **macOS Keychain（`Claude Code-credentials`）優先、無ければ `~/.claude/.credentials.json`**。**自動リフレッシュはしない**（refresh token ローテーション / Keychain 書き戻しで本体ログインを壊すリスクを避けるため）。401 時はユーザーに `claude` を一度起動するよう案内する。
+- **`official-poll.ts`**: `createOfficialPoller` factory。watch / daemon の両方で使う「再取得周期 + 失敗時バックオフ + 401 特例 + 並列 fetch 抑制」を 1 箇所に集約。`OFFICIAL_REFRESH_MS=180s` / `OFFICIAL_MIN_GAP_MS=30s`（最低 fetch 間隔、Retry-After: 0 でもこれ未満には縮めない）/ `OFFICIAL_BACKOFF_INITIAL_MS=5s` で指数バックオフ → 上限 `OFFICIAL_BACKOFF_MAX_MS=15min`。
 - **`snapshot.ts`**: 上記を束ねた集計結果。**API 値が取れた時のみ % と reset を確定**、limit はトークン消費から逆算。
+- **`daemon.ts`**: `Scanner` + `buildSnapshot` の薄いラッパで `{ schema_version, generated_at, snapshot }` の JSON を `<path>.tmp` 経由の rename で atomic に書き出す。macOS メニューバーアプリ（外部 consumer）と共有する固定スキーマ。**`render/` 非依存**で webapp と同じレイヤに属する。**file mode は 0600 固定**（session タイトル / token 使用量を含むため owner-only）。`SerializedSnapshot` は field-by-field 列挙 + `satisfies` で Snapshot 拡張時に TS が落ちるよう型でゲートする。SIGINT/SIGTERM は CLI 層が `AbortController` に変換して `signal` で渡し、`runDaemon` 自体は `process` に触らない。
 - **`render/`**: 表示専用。`bars.ts` の `Ticker` が**フレーム間差分による株価風の ▲▼ 着色**を担当（watch のみ）。
 
 ### トークン帰属の前提

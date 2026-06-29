@@ -39,7 +39,55 @@ bun run src/cli.ts report --since block                 # current 5h window (def
 bun run src/cli.ts report --since today --official      # % / reset time / limit estimate
 bun run src/cli.ts report --since block --expand        # drill the tool breakdown into Workflow/Agent
 bun run src/cli.ts report --since 7d --by tool,model,session,project --top 12
+
+# Snapshot daemon (for the macOS menu-bar app and other external consumers)
+bun run src/cli.ts daemon --emit ~/.cctok/snapshot.json
+bun run src/cli.ts daemon --emit ~/.cctok/snapshot.json --interval 2 --local
 ```
+
+#### `daemon` JSON contract
+
+`cctok daemon` writes a single JSON object to `--emit <path>` and rewrites it every
+`--interval` seconds (default 5s, minimum 1s). The write is atomic — the file is first
+written to `<path>.tmp` and then `rename(2)`d into place, so readers never observe a
+partial file. The file is created with mode `0600` (owner-only readable), so put it
+under a user-private directory such as `~/.cctok/`. On `SIGINT` / `SIGTERM` the daemon
+exits cleanly and leaves no `.tmp` behind. With `--local` no `/api/oauth/usage` call is
+made; `--official` (default on) includes `%` / reset time / derived limit when the API
+is reachable.
+
+The canonical type is `SerializedSnapshot` in [`src/daemon.ts`](./src/daemon.ts) — the
+exact set of fields. The shape below is illustrative; consumers should ignore any keys
+they do not recognise rather than reject the payload.
+
+```jsonc
+{
+  "schema_version": 1,
+  "generated_at": "2026-06-29T02:06:17.954Z", // ISO 8601, when the payload was built
+  "snapshot": {
+    // The Snapshot type from src/snapshot.ts, with sessionTitles as a plain object
+    // (sessionId -> display name) instead of a Map.
+    "now": 1782698777954, "windowMs": 18000000, "windowStart": 1782680777954,
+    "hasActivity": true, "turns": 5, "usedWeighted": 4170,
+    "pct": null, "resetTs": null, "effectiveLimit": null,
+    "totals": { "input": 0, "output": 0, "cacheCreation": 0, "cacheRead": 0 },
+    "cost": 0,
+    "burnWindow":  { "weightedPerMin": 0, "rawPerMin": 0 },
+    "burn1m":      { "weightedPerMin": 0, "rawPerMin": 0 },
+    "burn10":      { "weightedPerMin": 0, "rawPerMin": 0 },
+    "burnHour":    { "weightedPerMin": 0, "rawPerMin": 0 },
+    "budgetBurnPerMin": null,
+    "projection":  null,                  // null | { runOutMs, runOutAt }
+    "cumul":       null,                  // null | { past, prediction, start, end }
+    "official":    null,                  // null | parsed /api/oauth/usage payload
+    "breakdowns":  { /* by tool/model/session/project/hour + drill */ },
+    "sessionTitles": { "sess-1": "Title One" }
+  }
+}
+```
+
+Bump `schema_version` only on breaking changes (removing or renaming a field, changing
+its type, etc.). Adding a new optional field is non-breaking.
 
 To use it as `cctok`, either `bun link` or `alias cctok='bun run /path/to/src/cli.ts'`.
 
@@ -93,18 +141,21 @@ bun test            # unit + integration tests
 bun run typecheck   # tsc --noEmit
 ```
 
-| Module             | Role                                                                |
-| ------------------ | ------------------------------------------------------------------- |
-| `src/parse.ts`     | JSONL line → TurnRecord / tool I/O                                  |
-| `src/scan.ts`      | Recursive glob + incremental tail by byte offset                    |
-| `src/pricing.ts`   | Per-model pricing, cost conversion, token weighting                 |
-| `src/blocks.ts`    | 5h window burn rate / exhaustion projection                         |
-| `src/aggregate.ts` | Model / session / project / hour aggregation                        |
-| `src/attribute.ts` | Per-tool attribution (measured + estimated)                         |
-| `src/official.ts`  | `/api/oauth/usage` fetch (Keychain/creds) and parsing               |
-| `src/snapshot.ts`  | The bundled snapshot (fixes % / reset from API values)              |
-| `src/render/`      | `bars` (formatting / `Ticker`), `report` (one-shot), `watch` (live) |
-| `src/cli.ts`       | `watch` / `report` / `usage` dispatch                               |
+| Module                 | Role                                                                |
+| ---------------------- | ------------------------------------------------------------------- |
+| `src/parse.ts`         | JSONL line → TurnRecord / tool I/O                                  |
+| `src/scan.ts`          | Recursive glob + incremental tail by byte offset                    |
+| `src/scan-state.ts`    | `merge` / `pruneState` shared by `watch` and `daemon`               |
+| `src/pricing.ts`       | Per-model pricing, cost conversion, token weighting                 |
+| `src/blocks.ts`        | 5h window burn rate / exhaustion projection                         |
+| `src/aggregate.ts`     | Model / session / project / hour aggregation                        |
+| `src/attribute.ts`     | Per-tool attribution (measured + estimated)                         |
+| `src/official.ts`      | `/api/oauth/usage` fetch (Keychain/creds) and parsing               |
+| `src/official-poll.ts` | Refresh-cadence / backoff / 401 handling shared by `watch`/`daemon` |
+| `src/snapshot.ts`      | The bundled snapshot (fixes % / reset from API values)              |
+| `src/render/`          | `bars` (formatting / `Ticker`), `report` (one-shot), `watch` (live) |
+| `src/daemon.ts`        | Snapshot JSON emitter (atomic write, mode 0600, AbortSignal-driven) |
+| `src/cli.ts`           | `watch` / `report` / `usage` / `daemon` dispatch                    |
 
 The core under `src/` (everything except `render/`) is kept reusable so a future web app can swap out only `render/`.
 

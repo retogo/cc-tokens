@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { parsePositiveFloat, parsePositiveInt, parseSince } from "../src/cli.ts";
+import {
+  parsePositiveFloat,
+  parsePositiveInt,
+  parseSince,
+  validateEmitPath,
+} from "../src/cli.ts";
 
 /** stderr.write を一時的に差し替えて警告文字列を捕捉する。 */
 function captureStderr(fn: () => void): string {
@@ -76,6 +81,44 @@ describe("parsePositiveInt（parseInt の寛容パースを禁止）", () => {
       expect(parsePositiveInt("0", "top")).toBeUndefined();
       expect(parsePositiveInt("-3", "top")).toBeUndefined();
     });
+  });
+});
+
+describe("validateEmitPath（daemon --emit のパス入力検証）", () => {
+  test("通常のファイルパスはそのまま通る", () => {
+    captureStderr(() => {
+      expect(validateEmitPath("/tmp/snapshot.json")).toBe("/tmp/snapshot.json");
+    });
+  });
+
+  test("undefined / 空白だけは reject", () => {
+    let result: string | null = "init";
+    const warn = captureStderr(() => {
+      result = validateEmitPath(undefined);
+    });
+    expect(result).toBeNull();
+    expect(warn).toContain("--emit");
+    captureStderr(() => {
+      expect(validateEmitPath("   ")).toBeNull();
+    });
+  });
+
+  test("末尾が / のパス（ディレクトリ指定）は reject", () => {
+    let result: string | null = "init";
+    const warn = captureStderr(() => {
+      result = validateEmitPath("/tmp/snapshots/");
+    });
+    expect(result).toBeNull();
+    expect(warn).toContain("file, not a directory");
+  });
+
+  test("'~' リテラル始まり（launchd の典型ミス）は reject", () => {
+    let result: string | null = "init";
+    const warn = captureStderr(() => {
+      result = validateEmitPath("~/.cctok/snapshot.json");
+    });
+    expect(result).toBeNull();
+    expect(warn).toContain("expanded absolute path");
   });
 });
 

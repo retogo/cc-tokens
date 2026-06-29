@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { parseArgs } from "node:util";
 import { loadConfig } from "./config.ts";
+import { runDaemon } from "./daemon.ts";
 import type { OfficialUsage } from "./official.ts";
 import { fetchOfficialUsage, OfficialFetchError } from "./official.ts";
 import { claudeProjectsDir } from "./paths.ts";
@@ -23,10 +24,16 @@ Usage:
   cctok usage
       Fetch 5h/7d % and the true reset time from /api/oauth/usage
 
+  cctok daemon --emit <path> [--interval 5] [--official|--local]
+      Write snapshot JSON ({ schema_version, generated_at, snapshot })
+      atomically to <path> every interval seconds (min 1s, default 5s).
+      The file is written with mode 0600 (owner-only). Intended for the
+      macOS menu-bar app and other external consumers.
+
 Common options:
   --official       Fetch % / true reset time / limit (derived) from /api/oauth/usage
-                   (on by default in watch, opt-in for report; needs an OAuth token.
-                    On 401, launch claude once to refresh the token)
+                   (on by default in watch and daemon, opt-in for report;
+                    needs an OAuth token. On 401, launch claude once to refresh)
   --local          Don't fetch the API (local only, no network / Keychain)
   --root <dir>     projects root (default: ~/.claude/projects)
   -h, --help
@@ -78,6 +85,32 @@ export function parsePositiveInt(raw: string | undefined, flag: string): number 
   return Number(raw);
 }
 
+/**
+ * daemon --emit のパスを検証する。
+ * - 未指定 / 空白だけ → エラー
+ * - 末尾 `/`（ディレクトリ指定っぽい） → エラー
+ * - `~` リテラル始まり（シェル expand 済みでない） → エラー（launchd plist の典型ミス）
+ * これらに通った場合は文字列をそのまま返す。シンボリックリンクの拒否は writeFile 経路で
+ * 行う想定（rename がリンク先を上書きするのは想定内とし、ここでは入力 sanitation のみ）。
+ */
+export function validateEmitPath(raw: string | undefined): string | null {
+  if (raw === undefined || raw.trim() === "") {
+    process.stderr.write("daemon: --emit <path> is required\n");
+    return null;
+  }
+  if (raw.endsWith("/")) {
+    process.stderr.write(`daemon: --emit must point to a file, not a directory (${raw})\n`);
+    return null;
+  }
+  if (raw.startsWith("~")) {
+    process.stderr.write(
+      `daemon: --emit must be an expanded absolute path; '~' is not expanded by the CLI (${raw})\n`,
+    );
+    return null;
+  }
+  return raw;
+}
+
 export function parsePositiveFloat(raw: string | undefined, flag: string): number | undefined {
   if (raw === undefined) return undefined;
   // 5 / 5.0 / 0.5 / .5 を許容。末尾ゴミは弾く。
@@ -102,6 +135,7 @@ async function main() {
       since: { type: "string" },
       by: { type: "string" },
       root: { type: "string" },
+      emit: { type: "string" },
       official: { type: "boolean" },
       local: { type: "boolean" },
       expand: { type: "boolean" },
@@ -142,6 +176,62 @@ async function main() {
       official: values.local ? false : (values.official ?? true),
       expand: values.expand ?? false,
     });
+    return;
+  }
+
+  if (cmd === "daemon") {
+    const emitPath = validateEmitPath(values.emit);
+    if (emitPath === null) {
+      // validateEmitPath 内で stderr に詳細を出している。
+      process.exit(1);
+    }
+    // --interval は CLI フラグの場合のみ「最小 1s」警告を出す（config 由来の値には別文言）。
+    const cliInterval = parsePositiveFloat(values.interval, "interval");
+    let intervalSec: number;
+    if (cliInterval !== undefined) {
+      if (cliInterval < 1) {
+        process.stderr.write(
+          `--interval ${cliInterval} is below the minimum of 1s; using 1s instead\n`,
+        );
+      }
+      intervalSec = Math.max(cliInterval, 1);
+    } else {
+      // config.intervalSec が壊れていた場合（非数値・非正・非有限）は DEFAULTS と同じ 5 に戻す。
+      // loadConfig は schema 検証していないので外部境界として CLI 側で守る。
+      const cfg = config.intervalSec;
+      if (!Number.isFinite(cfg) || cfg <= 0) {
+        process.stderr.write(
+          `config intervalSec is invalid (${String(cfg)}); using default 5s\n`,
+        );
+        intervalSec = 5;
+      } else if (cfg < 1) {
+        process.stderr.write(
+          `config intervalSec=${cfg} is below the minimum of 1s; using 1s instead\n`,
+        );
+        intervalSec = 1;
+      } else {
+        intervalSec = cfg;
+      }
+    }
+    const intervalMs = intervalSec * 1000;
+
+    // signal は CLI 層が SIGINT/SIGTERM から AbortController に変換して渡す（runDaemon は process に直接触らない）。
+    const aborter = new AbortController();
+    const onSignal = () => aborter.abort();
+    process.once("SIGINT", onSignal);
+    process.once("SIGTERM", onSignal);
+    const ctrl = runDaemon(root, config, {
+      emitPath,
+      intervalMs,
+      official: values.local ? false : (values.official ?? true),
+      signal: aborter.signal,
+    });
+    try {
+      await ctrl.done;
+    } finally {
+      process.off("SIGINT", onSignal);
+      process.off("SIGTERM", onSignal);
+    }
     return;
   }
 
