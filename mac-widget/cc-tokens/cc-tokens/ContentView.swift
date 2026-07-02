@@ -254,7 +254,73 @@ struct ContentView: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+
+            // Session / model 別内訳。cacheRead は除外した raw トークンで並べる（headline と揃える）。
+            breakdownSection(
+                title: "By model",
+                rows: snap.breakdowns.byModel,
+                nameFor: { $0.key }
+            )
+            breakdownSection(
+                title: "By session",
+                rows: snap.breakdowns.bySession,
+                nameFor: { row in snap.sessionTitles[row.key] ?? String(row.key.prefix(8)) }
+            )
         }
+    }
+
+    /// 内訳セクション（model / session 共通）。上位 5 件のみ表示し、それ以外は "and N more" にまとめる。
+    /// share は weighted ベースなので daemon 既定の raw モードでは表示 tok と整合する。
+    @ViewBuilder
+    private func breakdownSection(
+        title: String,
+        rows: [BreakdownRow],
+        nameFor: @escaping (BreakdownRow) -> String
+    ) -> some View {
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .textCase(.uppercase)
+                let top = Array(rows.prefix(5))
+                ForEach(top) { row in
+                    breakdownRow(name: nameFor(row), row: row)
+                }
+                if rows.count > top.count {
+                    Text("and \(rows.count - top.count) more")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+    }
+
+    private func breakdownRow(name: String, row: BreakdownRow) -> some View {
+        HStack(spacing: 8) {
+            Text(name)
+                .font(.caption)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(kiloText(Double(row.rawTokens)))
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            Text(sharePctText(row.share))
+                .font(.caption2)
+                .monospacedDigit()
+                .foregroundStyle(.tertiary)
+                .frame(width: 38, alignment: .trailing)
+        }
+    }
+
+    /// share (0..1) を "12%" 表記に。1% 未満は "<1%"。
+    private func sharePctText(_ share: Double) -> String {
+        if share <= 0 { return "0%" }
+        let pct = share * 100
+        if pct < 1 { return "<1%" }
+        return "\(Int(pct.rounded()))%"
     }
 
     private func tokenChip(label: String, value: Int) -> some View {

@@ -74,6 +74,38 @@ struct Snapshot: Decodable {
     let effectiveLimit: Double?
     /// 累積使用率の折れ線データ。effectiveLimit が無いと % に意味がないので null になる。
     let cumul: CumulData?
+    /// 現在ウィンドウの各軸内訳（model / session / project / hour ...）。schema_version 1 から常に存在。
+    let breakdowns: Breakdowns
+    /// sessionId → 表示名（custom-title 優先、無ければ ai-title）。未取得のセッションは欠落する。
+    let sessionTitles: [String: String]
+}
+
+/// 各軸の内訳セット。TS 側 RangedBreakdowns に対応。
+/// tools / drill も JSON には含まれるが menubar では未使用なので decode しない（余分キーは無視される）。
+struct Breakdowns: Decodable {
+    let byModel: [BreakdownRow]
+    let bySession: [BreakdownRow]
+    let byProject: [BreakdownRow]
+    let byHour: [BreakdownRow]
+}
+
+/// 内訳の 1 行（model / session / project / hour で共通）。TS 側 BreakdownRow に対応。
+struct BreakdownRow: Decodable, Identifiable {
+    /// 集計キー（model 名 / sessionId / project パス / "00".."23"）。
+    let key: String
+    let usage: Totals
+    /// 加重消費（daemon 既定の raw モードでは input+output+cacheCreation と一致）。
+    let weighted: Double
+    let cost: Double
+    /// ターン数（= message.id 単位のカウント）。
+    let count: Int
+    /// weighted 全体に占める割合（0..1）。
+    let share: Double
+
+    var id: String { key }
+
+    /// 生トークン（input+output+cacheCreation）。cacheRead は headline / totals 表示と揃えて除外。
+    var rawTokens: Int { usage.input + usage.output + usage.cacheCreation }
 }
 
 /// cumul チャート用のデータ。
