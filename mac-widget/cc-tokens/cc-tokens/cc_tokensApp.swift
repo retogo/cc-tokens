@@ -3,8 +3,8 @@
 //  cc-tokens
 //
 //  MenuBarExtra(.window) の常駐アプリ。クリックでパネルが開き、開いたまま 1Hz で再描画される。
-//  デフォルトで Dock アイコンも出る。Dock を消して純メニューバーアプリ化したい場合は
-//  Info.plist に LSUIElement = YES を足す (Build Settings: INFOPLIST_KEY_LSUIElement = YES)。
+//  Dock アイコンは出さない純メニューバーアプリ (Build Settings: INFOPLIST_KEY_LSUIElement[sdk=macosx*] = YES)。
+//  LSUIElement = YES だと App メニュー (Cmd+Q) も消えるので、終了は ContentView の Quit ボタンで行う。
 //
 
 import SwiftUI
