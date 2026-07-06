@@ -25,7 +25,7 @@ export interface OfficialPollerState {
   error: string | null;
   /** 直近成功 fetch の時刻（epoch ms）。一度も成功していなければ null。 */
   lastFetchAt: number | null;
-  /** 次回 refresh の予定時刻（epoch ms）。enabled=false / 起動直後は null（即時可）。 */
+  /** 次回 refresh の予定時刻（epoch ms）。起動直後は null（即時可）。 */
   nextRetryAt: number | null;
 }
 
@@ -57,10 +57,9 @@ export interface OfficialPoller {
  * onError は watch のように UI 注記が必要な場合に渡す（daemon は stderr に書くハンドラを渡す）。
  */
 export function createOfficialPoller(opts: {
-  enabled: boolean;
   fetchNow?: () => Promise<OfficialUsage>;
   onError?: (msg: string) => void;
-}): OfficialPoller {
+} = {}): OfficialPoller {
   const fetchFn = opts.fetchNow ?? (() => fetchOfficialUsage(Date.now()));
   const state: OfficialPollerState = {
     official: null,
@@ -74,7 +73,6 @@ export function createOfficialPoller(opts: {
   let inflight: Promise<void> | null = null;
 
   const doRefresh = async (): Promise<void> => {
-    if (!opts.enabled) return;
     if (inflight) return inflight;
     inflight = (async () => {
       try {
@@ -119,7 +117,7 @@ export function createOfficialPoller(opts: {
 
   return {
     state,
-    shouldRefresh: (now) => opts.enabled && now >= nextAt,
+    shouldRefresh: (now) => now >= nextAt,
     refresh: doRefresh,
     refreshManually: async () => {
       backoffMs = OFFICIAL_BACKOFF_INITIAL_MS;

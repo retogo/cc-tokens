@@ -9,21 +9,9 @@ function ok(fetchedAt: number): OfficialUsage {
 }
 
 describe("createOfficialPoller", () => {
-  test("enabled:false ではどの呼び出しも no-op で state は更新されない", async () => {
-    const poller = createOfficialPoller({
-      enabled: false,
-      fetchNow: () => Promise.resolve(ok(123)),
-    });
-    expect(poller.shouldRefresh(Date.now())).toBe(false);
-    await poller.refresh();
-    expect(poller.state.official).toBe(null);
-    expect(poller.state.error).toBe(null);
-  });
-
   test("成功すると official を更新し error をクリアする", async () => {
     let calls = 0;
     const poller = createOfficialPoller({
-      enabled: true,
       fetchNow: async () => {
         calls += 1;
         return ok(1000 + calls);
@@ -40,7 +28,6 @@ describe("createOfficialPoller", () => {
   test("失敗時は lastFetchAt は更新せず nextRetryAt は未来時刻に倒す", async () => {
     let n = 0;
     const poller = createOfficialPoller({
-      enabled: true,
       fetchNow: async () => {
         n += 1;
         if (n === 1) return ok(7777);
@@ -61,7 +48,6 @@ describe("createOfficialPoller", () => {
   test("失敗時は前回値を保持し error を立てる（official は消さない）", async () => {
     let n = 0;
     const poller = createOfficialPoller({
-      enabled: true,
       fetchNow: async () => {
         n += 1;
         if (n === 1) return ok(999);
@@ -79,7 +65,6 @@ describe("createOfficialPoller", () => {
   test("Retry-After: 0 は明示的に尊重し、MIN_GAP（30s）を最低値として待つ（180s 待たない）", async () => {
     // Retry-After=0 を falsy 扱いしてバックオフ 180s で潰す古い実装の退行検知。
     const poller = createOfficialPoller({
-      enabled: true,
       fetchNow: async () => {
         throw new OfficialFetchError("HTTP 429", 429, 0); // Retry-After: 0
       },
@@ -95,7 +80,6 @@ describe("createOfficialPoller", () => {
 
   test("成功直後は OFFICIAL_REFRESH_MS（180s）まで shouldRefresh が false", async () => {
     const poller = createOfficialPoller({
-      enabled: true,
       fetchNow: async () => ok(1),
     });
     const before = Date.now();
@@ -107,7 +91,6 @@ describe("createOfficialPoller", () => {
   test("refreshManually は backoff をリセットして即座に再試行できる", async () => {
     let n = 0;
     const poller = createOfficialPoller({
-      enabled: true,
       fetchNow: async () => {
         n += 1;
         if (n === 1) throw new OfficialFetchError("HTTP 500", 500);
@@ -125,7 +108,6 @@ describe("createOfficialPoller", () => {
     let calls = 0;
     let resolveFetch: (v: OfficialUsage) => void = () => {};
     const poller = createOfficialPoller({
-      enabled: true,
       fetchNow: () => {
         calls += 1;
         return new Promise<OfficialUsage>((resolve) => {
@@ -145,7 +127,6 @@ describe("createOfficialPoller", () => {
   test("onError コールバックは失敗時のメッセージで呼ばれる", async () => {
     const messages: string[] = [];
     const poller = createOfficialPoller({
-      enabled: true,
       fetchNow: async () => {
         throw new OfficialFetchError("HTTP 503");
       },

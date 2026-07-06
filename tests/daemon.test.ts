@@ -28,9 +28,8 @@ async function makeSnapshot() {
   return buildSnapshot(scan, DEFAULTS, NOW, null);
 }
 
-/** テスト用の no-op ApiStatus（buildEmitPayload に渡す）。 */
-const DISABLED_API_STATUS: ApiStatus = {
-  enabled: false,
+/** テスト用の idle な ApiStatus（未取得状態。buildEmitPayload に渡す）。 */
+const IDLE_API_STATUS: ApiStatus = {
   ok: false,
   error: null,
   last_fetch_at: null,
@@ -50,8 +49,8 @@ function withTmp<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 }
 
 describe("SCHEMA_VERSION", () => {
-  test("contract version is 1", () => {
-    expect(SCHEMA_VERSION).toBe(1);
+  test("contract version is 2", () => {
+    expect(SCHEMA_VERSION).toBe(2);
   });
 });
 
@@ -86,7 +85,7 @@ describe("serializeSnapshot", () => {
   test("round-trips through JSON.stringify without losing sessionTitles", async () => {
     const snap = await makeSnapshot();
     snap.sessionTitles.set("sess-a", "Alpha");
-    const payload = buildEmitPayload(snap, Date.now(), DISABLED_API_STATUS);
+    const payload = buildEmitPayload(snap, Date.now(), IDLE_API_STATUS);
     const text = JSON.stringify(payload);
     const decoded = JSON.parse(text);
     expect(decoded.snapshot.sessionTitles).toEqual({ "sess-a": "Alpha" });
@@ -98,10 +97,10 @@ describe("serializeSnapshot", () => {
     // SCHEMA_VERSION の bump 判断を促すゲートとして機能する。
     const snap = await makeSnapshot();
     snap.sessionTitles.set("sess-x", "Xray");
-    const payload = buildEmitPayload(snap, NOW, DISABLED_API_STATUS);
+    const payload = buildEmitPayload(snap, NOW, IDLE_API_STATUS);
     const decoded = JSON.parse(JSON.stringify(payload));
     // schema_version と generated_at の型保証
-    expect(decoded.schema_version).toBe(1);
+    expect(decoded.schema_version).toBe(2);
     expect(typeof decoded.generated_at).toBe("string");
     // snapshot.* の主要フィールドを 1 件ずつ deep-equal で確認（Map/Set 漏れがあると {} になる）
     const s = decoded.snapshot;
@@ -130,38 +129,20 @@ describe("serializeSnapshot", () => {
 });
 
 describe("buildEmitPayload", () => {
-  test("returns { schema_version: 1, generated_at: ISO string, snapshot, api_status }", async () => {
+  test("returns { schema_version: 2, generated_at: ISO string, snapshot, api_status }", async () => {
     const snap = await makeSnapshot();
     const generatedAtMs = Date.parse("2026-06-18T00:03:00.000Z");
-    const payload = buildEmitPayload(snap, generatedAtMs, DISABLED_API_STATUS);
-    expect(payload.schema_version).toBe(1);
+    const payload = buildEmitPayload(snap, generatedAtMs, IDLE_API_STATUS);
+    expect(payload.schema_version).toBe(2);
     expect(payload.generated_at).toBe(new Date(generatedAtMs).toISOString());
     expect(payload.snapshot).toBeDefined();
-    expect(payload.api_status).toEqual(DISABLED_API_STATUS);
+    expect(payload.api_status).toEqual(IDLE_API_STATUS);
   });
 });
 
 describe("buildApiStatus", () => {
-  test("enabled=false に倒すと常に ok=false / 全 null", () => {
-    const result = buildApiStatus(false, {
-      state: {
-        official: { fiveHour: { utilization: 50, resetsAt: 1 } },
-        error: "ignored when disabled",
-        lastFetchAt: 100,
-        nextRetryAt: 200,
-      },
-    });
-    expect(result).toEqual({
-      enabled: false,
-      ok: false,
-      error: null,
-      last_fetch_at: null,
-      next_retry_at: null,
-    });
-  });
-
-  test("enabled かつ official あり / error なし → ok=true", () => {
-    const result = buildApiStatus(true, {
+  test("official あり / error なし → ok=true", () => {
+    const result = buildApiStatus({
       state: {
         official: { something: "value" },
         error: null,
@@ -169,7 +150,6 @@ describe("buildApiStatus", () => {
         nextRetryAt: 1782707180000,
       },
     });
-    expect(result.enabled).toBe(true);
     expect(result.ok).toBe(true);
     expect(result.error).toBeNull();
     expect(result.last_fetch_at).toBe(1782707000000);
@@ -177,7 +157,7 @@ describe("buildApiStatus", () => {
   });
 
   test("error 中でも前回 official を保持していれば error は出すが ok=false（stale 扱い）", () => {
-    const result = buildApiStatus(true, {
+    const result = buildApiStatus({
       state: {
         official: { something: "stale" },
         error: "429 Too Many Requests",
@@ -192,7 +172,7 @@ describe("buildApiStatus", () => {
   });
 
   test("一度も成功していない（official=null）と ok=false / last_fetch_at=null", () => {
-    const result = buildApiStatus(true, {
+    const result = buildApiStatus({
       state: {
         official: null,
         error: "401 Unauthorized",
@@ -210,12 +190,12 @@ describe("emitOnce（atomic write: tmp → rename）", () => {
     await withTmp(async (dir) => {
       const path = join(dir, "snapshot.json");
       const snap = await makeSnapshot();
-      const payload = buildEmitPayload(snap, NOW, DISABLED_API_STATUS);
+      const payload = buildEmitPayload(snap, NOW, IDLE_API_STATUS);
       await emitOnce(payload, path);
       const file = Bun.file(path);
       expect(await file.exists()).toBe(true);
       const data = await file.json();
-      expect(data.schema_version).toBe(1);
+      expect(data.schema_version).toBe(2);
       expect(data.snapshot.windowMs).toBe(snap.windowMs);
     });
   });
@@ -224,7 +204,7 @@ describe("emitOnce（atomic write: tmp → rename）", () => {
     await withTmp(async (dir) => {
       const path = join(dir, "snapshot.json");
       const snap = await makeSnapshot();
-      const payload = buildEmitPayload(snap, NOW, DISABLED_API_STATUS);
+      const payload = buildEmitPayload(snap, NOW, IDLE_API_STATUS);
       await emitOnce(payload, path);
       const tmp = Bun.file(`${path}.tmp`);
       expect(await tmp.exists()).toBe(false);
@@ -235,11 +215,11 @@ describe("emitOnce（atomic write: tmp → rename）", () => {
     await withTmp(async (dir) => {
       const path = join(dir, "snapshot.json");
       const snap = await makeSnapshot();
-      await emitOnce(buildEmitPayload(snap, NOW, DISABLED_API_STATUS), path);
+      await emitOnce(buildEmitPayload(snap, NOW, IDLE_API_STATUS), path);
       const first = await Bun.file(path).json();
       // 2 度目を別 generated_at で書き、上書きが効くこと
       const later = NOW + 60_000;
-      await emitOnce(buildEmitPayload(snap, later, DISABLED_API_STATUS), path);
+      await emitOnce(buildEmitPayload(snap, later, IDLE_API_STATUS), path);
       const second = await Bun.file(path).json();
       expect(second.generated_at).not.toBe(first.generated_at);
       expect(second.generated_at).toBe(new Date(later).toISOString());
@@ -251,7 +231,7 @@ describe("emitOnce（atomic write: tmp → rename）", () => {
     await withTmp(async (dir) => {
       const path = join(dir, "snapshot.json");
       const snap = await makeSnapshot();
-      await emitOnce(buildEmitPayload(snap, NOW, DISABLED_API_STATUS), path);
+      await emitOnce(buildEmitPayload(snap, NOW, IDLE_API_STATUS), path);
       const st = await stat(path);
       // 下位 9 bit のうち owner read/write のみが立っていること（0o600）
       const perm = st.mode & 0o777;
@@ -267,8 +247,7 @@ describe("runDaemon", () => {
       const ctrl = runDaemon(FIX, DEFAULTS, {
         emitPath: path,
         intervalMs: 50,
-        official: false,
-      });
+              });
       // 最初の emit を待つ。100ms 程度あれば 1〜2 回回る。
       const deadline = Date.now() + 2000;
       while (Date.now() < deadline) {
@@ -296,8 +275,7 @@ describe("runDaemon", () => {
       const ctrl = runDaemon(FIX, DEFAULTS, {
         emitPath: path,
         intervalMs: 300,
-        official: false,
-      });
+              });
       // 最初の emit を待つ
       const deadline = Date.now() + 2000;
       while (Date.now() < deadline) {
@@ -320,8 +298,7 @@ describe("runDaemon", () => {
       const ctrl = runDaemon(FIX, DEFAULTS, {
         emitPath: path,
         intervalMs: 50,
-        official: false,
-      });
+              });
       // 最初の seed が終わる前に止めにかかる可能性もあるが、stop() は必ず resolve する
       await ctrl.stop();
       expect(await Bun.file(`${path}.tmp`).exists()).toBe(false);
@@ -338,8 +315,7 @@ describe("runDaemon", () => {
       const ctrl = runDaemon(FIX, DEFAULTS, {
         emitPath: path,
         intervalMs: 50,
-        official: false,
-        signal: aborter.signal,
+                signal: aborter.signal,
       });
       await ctrl.done;
       expect(await Bun.file(path).exists()).toBe(false);
@@ -354,8 +330,7 @@ describe("runDaemon", () => {
       const ctrl = runDaemon(FIX, DEFAULTS, {
         emitPath: path,
         intervalMs: 50,
-        official: false,
-        signal: aborter.signal,
+                signal: aborter.signal,
       });
       // 最初の emit を待つ
       const deadline = Date.now() + 2000;

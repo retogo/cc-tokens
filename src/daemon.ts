@@ -7,8 +7,9 @@ import { merge, pruneState } from "./scan-state.ts";
 import { buildSnapshot } from "./snapshot.ts";
 import type { Snapshot } from "./snapshot.ts";
 
-/** メニューバーアプリと共有する JSON コントラクトのバージョン。破壊的変更は bump する。 */
-export const SCHEMA_VERSION = 1 as const;
+/** メニューバーアプリと共有する JSON コントラクトのバージョン。破壊的変更は bump する。
+ * v2: local-only モード撤廃に伴い api_status.enabled を削除（official は常時取得）。 */
+export const SCHEMA_VERSION = 2 as const;
 
 /** emit ファイルのパーミッション。snapshot には session タイトル等が含まれるので owner-only。 */
 const EMIT_FILE_MODE = 0o600;
@@ -32,18 +33,16 @@ export type SerializedSnapshot = Omit<Snapshot, "sessionTitles"> & {
 
 /**
  * 公式 API の取得状態。consumer (menu-bar app 等) が「% / reset が消えた理由」を
- * 表示するために使う（429 / 401 / network エラー等）。schema_version 1 への optional 追加。
+ * 表示するために使う（429 / 401 / network エラー等）。official は常時取得する。
  */
 export interface ApiStatus {
-  /** --official が有効か（false なら local-only 起動）。 */
-  enabled: boolean;
-  /** 直近 fetch が成功し、かつ value を保持しているか。enabled=false なら常に false。 */
+  /** 直近 fetch が成功し、かつ value を保持しているか。 */
   ok: boolean;
   /** 最終エラーメッセージ。成功時 / 未取得時は null。 */
   error: string | null;
   /** 直近成功 fetch の時刻（epoch ms）。一度も成功していなければ null。 */
   last_fetch_at: number | null;
-  /** 次回 refresh 予定時刻（epoch ms）。enabled=false / 起動直後は null。 */
+  /** 次回 refresh 予定時刻（epoch ms）。起動直後は null。 */
   next_retry_at: number | null;
 }
 
@@ -70,8 +69,6 @@ export interface RunDaemonOptions {
   emitPath: string;
   /** ループ間隔（ミリ秒）。CLI 層で最小 1 秒に強制する想定（テストは小さい値を渡す）。 */
   intervalMs: number;
-  /** 公式 API（/api/oauth/usage）を取得して % / reset を payload に含めるか。 */
-  official: boolean;
   /**
    * 停止シグナル（任意）。指定された場合、abort で graceful 終了する。
    * CLI 層で SIGINT/SIGTERM ハンドラを貼る用途（library として埋め込む際にも process 操作を分離する）。
@@ -130,25 +127,13 @@ export function buildEmitPayload(
 
 /**
  * OfficialPoller の state から ApiStatus を組み立てる。
- * - enabled=false（--local 起動）の時は常に ok=false / 全 null。
  * - error が出ていても official 値が残っていれば「stale だが使える」状態。
  *   ok の判定は error === null && official !== null とする。
  */
 export function buildApiStatus(
-  enabled: boolean,
   poller: { state: { official: unknown; error: string | null; lastFetchAt: number | null; nextRetryAt: number | null } },
 ): ApiStatus {
-  if (!enabled) {
-    return {
-      enabled: false,
-      ok: false,
-      error: null,
-      last_fetch_at: null,
-      next_retry_at: null,
-    };
-  }
   return {
-    enabled: true,
     ok: poller.state.error === null && poller.state.official !== null,
     error: poller.state.error,
     last_fetch_at: poller.state.lastFetchAt,
@@ -182,7 +167,7 @@ export async function emitOnce(payload: EmitPayload, path: string): Promise<void
  * snapshot を JSON ファイルに atomic に書き出し続ける daemon。
  * - 初回に直近 2× ウィンドウのみ seed する（巨大履歴の全読みを避ける）。
  * - intervalMs ごとに Scanner.poll → buildSnapshot → emitOnce を回す。
- * - --official 指定時は createOfficialPoller を経由してバックグラウンド再取得（失敗時バックオフ／401 特例）。
+ * - createOfficialPoller を経由して % / reset をバックグラウンド再取得（失敗時バックオフ／401 特例）。
  * - opts.signal で graceful 終了し、`.tmp` が残らないよう best-effort unlink。
  *   signal は CLI 層が SIGINT/SIGTERM を AbortController に変換して渡す想定。
  */
@@ -221,7 +206,6 @@ export function runDaemon(
     };
 
     const poller = createOfficialPoller({
-      enabled: opts.official,
       onError: (msg) => {
         process.stderr.write(`API unavailable (% / reset time hidden): ${msg}\n`);
       },
@@ -235,7 +219,7 @@ export function runDaemon(
       return;
     }
 
-    if (opts.official) await poller.refresh();
+    await poller.refresh();
     if (stopped) {
       await cleanupTmp(opts.emitPath);
       return;
@@ -250,7 +234,7 @@ export function runDaemon(
       pruneState(state, Date.now() - 2 * config.windowHours * 3600_000);
       const now = Date.now();
       const snap = buildSnapshot(state, config, now, poller.state.official);
-      const apiStatus = buildApiStatus(opts.official, poller);
+      const apiStatus = buildApiStatus(poller);
       try {
         await emitOnce(buildEmitPayload(snap, now, apiStatus), opts.emitPath);
         consecutiveEmitFailures = 0;

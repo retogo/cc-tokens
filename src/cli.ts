@@ -24,19 +24,19 @@ Usage:
   cctok usage
       Fetch 5h/7d % and the true reset time from /api/oauth/usage
 
-  cctok daemon --emit <path> [--interval 5] [--official|--local]
+  cctok daemon --emit <path> [--interval 5]
       Write snapshot JSON ({ schema_version, generated_at, snapshot })
       atomically to <path> every interval seconds (min 1s, default 5s).
       The file is written with mode 0600 (owner-only). Intended for the
       macOS menu-bar app and other external consumers.
 
 Common options:
-  --official       Fetch % / true reset time / limit (derived) from /api/oauth/usage
-                   (on by default in watch and daemon, opt-in for report;
-                    needs an OAuth token. On 401, launch claude once to refresh)
-  --local          Don't fetch the API (local only, no network / Keychain)
   --root <dir>     projects root (default: ~/.claude/projects)
   -h, --help
+
+All commands fetch % / true reset time / limit (derived) from /api/oauth/usage
+(needs an OAuth token). When it's unavailable, usage / burn / breakdown are still
+shown and % / reset are hidden. On 401, launch claude once to refresh.
 `;
 
 /** API usage を取得（失敗時は理由を stderr に出して null）。report 用。 */
@@ -136,8 +136,6 @@ async function main() {
       by: { type: "string" },
       root: { type: "string" },
       emit: { type: "string" },
-      official: { type: "boolean" },
-      local: { type: "boolean" },
       expand: { type: "boolean" },
       help: { type: "boolean", short: "h" },
     },
@@ -173,7 +171,6 @@ async function main() {
       intervalMs,
       topN: topN ?? 6,
       axes: parseAxes(values.by, ["tool", "model", "session"]),
-      official: values.local ? false : (values.official ?? true),
       expand: values.expand ?? false,
     });
     return;
@@ -223,7 +220,6 @@ async function main() {
     const ctrl = runDaemon(root, config, {
       emitPath,
       intervalMs,
-      official: values.local ? false : (values.official ?? true),
       signal: aborter.signal,
     });
     try {
@@ -241,7 +237,7 @@ async function main() {
     const scanner = new Scanner(root);
     const from = rangeStart(since, now);
     const scan = await scanner.seed(from ?? undefined);
-    const official = values.official ? await safeOfficial(now) : null;
+    const official = await safeOfficial(now);
     const snap = buildSnapshot(scan, config, now, official);
 
     // block は snap.breakdowns（=5h ウィンドウ集計）をそのまま使い、

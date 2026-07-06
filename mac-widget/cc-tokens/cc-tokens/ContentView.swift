@@ -118,10 +118,10 @@ struct ContentView: View {
     }
 
     /// API が rate-limited / 認証切れ / network 失敗等で % が消えた理由を見せる。
-    /// 表示条件: apiStatus.enabled かつ !ok。enabled=false (--local) 時は何も出さない。
+    /// 表示条件: apiStatus があり !ok（official は常時取得するので enabled 概念はない）。
     @ViewBuilder
     private func apiStatusBanner(_ apiStatus: ApiStatus?) -> some View {
-        if let status = apiStatus, status.enabled, !status.ok {
+        if let status = apiStatus, !status.ok {
             HStack(spacing: 8) {
                 Image(systemName: apiStatusIcon(status))
                     .foregroundStyle(apiStatusTint(status))
@@ -255,26 +255,44 @@ struct ContentView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
 
+            // ウィンドウ合計コスト。$ は $/Mtok 単価による近似なので "~" を付ける
+            // (実課金ではなく 5h 制限の加重 proxy。config.weighting/priceOverrides に依存)。
+            HStack {
+                Image(systemName: "dollarsign.circle")
+                    .foregroundStyle(.secondary)
+                Text(costText(snap.cost, approx: true))
+                    .monospacedDigit()
+                Spacer()
+                Text("this window")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .font(.callout)
+
             // Session / model 別内訳。cacheRead は除外した raw トークンで並べる（headline と揃える）。
+            // % は「5h 制限に対する割合」= row.share × pct。pct が無い間は % 列を出さない。
             breakdownSection(
                 title: "By model",
                 rows: snap.breakdowns.byModel,
+                pct: snap.pct,
                 nameFor: { $0.key }
             )
             breakdownSection(
                 title: "By session",
                 rows: snap.breakdowns.bySession,
+                pct: snap.pct,
                 nameFor: { row in snap.sessionTitles[row.key] ?? String(row.key.prefix(8)) }
             )
         }
     }
 
     /// 内訳セクション（model / session 共通）。上位 5 件のみ表示し、それ以外は "and N more" にまとめる。
-    /// share は weighted ベースなので daemon 既定の raw モードでは表示 tok と整合する。
+    /// 中央のトークン列は raw トークン、右の % は 5h 制限に対する割合（row.share × pct）。
     @ViewBuilder
     private func breakdownSection(
         title: String,
         rows: [BreakdownRow],
+        pct: Double?,
         nameFor: @escaping (BreakdownRow) -> String
     ) -> some View {
         if !rows.isEmpty {
@@ -285,7 +303,7 @@ struct ContentView: View {
                     .textCase(.uppercase)
                 let top = Array(rows.prefix(5))
                 ForEach(top) { row in
-                    breakdownRow(name: nameFor(row), row: row)
+                    breakdownRow(name: nameFor(row), row: row, pct: pct)
                 }
                 if rows.count > top.count {
                     Text("and \(rows.count - top.count) more")
@@ -296,7 +314,7 @@ struct ContentView: View {
         }
     }
 
-    private func breakdownRow(name: String, row: BreakdownRow) -> some View {
+    private func breakdownRow(name: String, row: BreakdownRow, pct: Double?) -> some View {
         HStack(spacing: 8) {
             Text(name)
                 .font(.caption)
@@ -307,12 +325,27 @@ struct ContentView: View {
                 .font(.caption)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-            Text(sharePctText(row.share))
-                .font(.caption2)
+            Text(costText(row.cost))
+                .font(.caption)
                 .monospacedDigit()
-                .foregroundStyle(.tertiary)
-                .frame(width: 38, alignment: .trailing)
+                .foregroundStyle(.secondary)
+                .frame(width: 52, alignment: .trailing)
+            // 制限比 %（row.share × pct）。pct が無い間（API 未取得 / 一時失敗）は列ごと出さない。
+            if let text = limitShareText(row.share, pct: pct) {
+                Text(text)
+                    .font(.caption2)
+                    .monospacedDigit()
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 38, alignment: .trailing)
+            }
         }
+    }
+
+    /// 5h 制限に対する割合を "12%" 表記に。pct（API 利用率 0..1）が無ければ nil（% 非表示）。
+    /// 各行 share × pct の和は headline の pct に一致する。1% 未満は "<1%"。
+    private func limitShareText(_ share: Double, pct: Double?) -> String? {
+        guard let pct else { return nil }
+        return sharePctText(share * pct)
     }
 
     /// share (0..1) を "12%" 表記に。1% 未満は "<1%"。
@@ -321,6 +354,20 @@ struct ContentView: View {
         let pct = share * 100
         if pct < 1 { return "<1%" }
         return "\(Int(pct.rounded()))%"
+    }
+
+    /// $ 表記。$/Mtok 単価による近似なので合計 (approx) には "~" を付ける
+    /// (行は幅節約で $ のみ)。$100 以上は小数を落とし、0 超 0.01 未満は "<$0.01"。
+    private func costText(_ v: Double, approx: Bool = false) -> String {
+        let s: String
+        if v > 0 && v < 0.01 {
+            s = "<$0.01"
+        } else if v >= 100 {
+            s = String(format: "$%.0f", v)
+        } else {
+            s = String(format: "$%.2f", v)
+        }
+        return approx ? "~\(s)" : s
     }
 
     private func tokenChip(label: String, value: Int) -> some View {

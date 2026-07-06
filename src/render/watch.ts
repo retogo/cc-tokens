@@ -22,8 +22,6 @@ const SHOW = "\x1b[?25h";
 
 export interface WatchOptions extends ReportOptions {
   intervalMs: number;
-  /** 公式 usage を取得して % / reset を表示・自動キャリブレーションするか。 */
-  official: boolean;
 }
 
 /**
@@ -89,7 +87,7 @@ export async function watch(root: string, config: Config, opts: WatchOptions): P
       }
       if (s === "r") {
         // r: API usage を即時再取得（401 などの一時エラー復旧後にユーザが明示的に促せる）。
-        if (opts.official && !refreshing) {
+        if (!refreshing) {
           refreshing = true;
           // backoff をリセットしてから fire-and-forget。完了で rebuild。
           poller.refreshManually().finally(() => {
@@ -124,7 +122,7 @@ export async function watch(root: string, config: Config, opts: WatchOptions): P
 
   // API usage は別系統で定期取得（描画ループはブロックしない）。
   // poller が前回値の保持・401 特例・指数バックオフを内蔵している（daemon と共通）。
-  const poller = createOfficialPoller({ enabled: opts.official });
+  const poller = createOfficialPoller();
   // 手動 refresh 中フラグ（多重押下で fetchOfficialUsage を並列起動しない）。
   let refreshing = false;
   await poller.refresh();
@@ -150,7 +148,7 @@ export async function watch(root: string, config: Config, opts: WatchOptions): P
       showSessionIds,
     });
     let apiNote = "";
-    if (opts.official && poller.state.error) {
+    if (poller.state.error) {
       if (poller.state.official) {
         const ageMin = Math.floor((now - poller.state.official.fetchedAt) / 60_000);
         apiNote = color.dim(
@@ -179,7 +177,7 @@ export async function watch(root: string, config: Config, opts: WatchOptions): P
       lines.length > viewport
         ? ` · ${scroll + 1}-${Math.min(scroll + viewport, lines.length)}/${lines.length} ↑↓`
         : "";
-    const refreshHint = opts.official ? " · r refresh" : "";
+    const refreshHint = " · r refresh";
     const updated = new Date(lastUpdate).toLocaleTimeString();
     const tick = `${opts.intervalMs / 1000}s`;
     const sessionMode = showSessionIds ? "name" : "id";

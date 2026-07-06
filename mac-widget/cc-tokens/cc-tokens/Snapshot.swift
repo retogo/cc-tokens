@@ -27,8 +27,6 @@ struct EmitPayload: Decodable {
 /// 公式 API (/api/oauth/usage) の取得状態。429 / 401 / network エラーで
 /// % / reset / cumul が null に倒れた理由を panel に表示するために使う。
 struct ApiStatus: Decodable {
-    /// --official が有効か。--local 起動だと常に false。
-    let enabled: Bool
     /// 直近 fetch が成功し、かつ value を保持しているか。
     let ok: Bool
     /// 最終エラーメッセージ。成功時 / 未取得時は null。
@@ -39,7 +37,6 @@ struct ApiStatus: Decodable {
     let nextRetryAt: Double?
 
     enum CodingKeys: String, CodingKey {
-        case enabled
         case ok
         case error
         case lastFetchAt = "last_fetch_at"
