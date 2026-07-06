@@ -21,7 +21,7 @@ export const PRICES: Record<string, ModelPrice> = {
   opus: fromBase(5, 25),
   sonnet: fromBase(3, 15),
   haiku: fromBase(1, 5),
-  fable: fromBase(5, 25),
+  fable: fromBase(10, 50),
 };
 
 /** 未知モデルの fallback（opus 相当）。 */

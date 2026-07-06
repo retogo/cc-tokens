@@ -29,6 +29,14 @@ describe("pricing (テスト4)", () => {
     expect(priceFor("claude-sonnet-4-6").output).toBe(15);
   });
 
+  test("Fable 5 の料金: input=10 / output=50（opus 相当ではない）", () => {
+    const p = priceFor("claude-fable-5");
+    expect(p.input).toBe(10);
+    expect(p.output).toBe(50);
+    expect(p.cacheWrite).toBeCloseTo(12.5, 10);
+    expect(p.cacheRead).toBeCloseTo(1.0, 10);
+  });
+
   test("未知モデルは fallback 価格を返す（例外を投げない）", () => {
     expect(priceFor("totally-unknown-model").input).toBeGreaterThan(0);
   });
