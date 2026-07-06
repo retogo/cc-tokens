@@ -13,7 +13,7 @@
 
 A live CLI that monitors Claude Code's **5-hour rolling window** consumption — burn rate, exhaustion ETA, and a breakdown of **what (tool / session / project / model / hour) is spending how many tokens**.
 
-It works by parsing the local transcripts (`*.jsonl`) under `~/.claude/projects`. The official `/api/oauth/usage` endpoint is used **only** to show the true `%` and reset time, and to derive the limit; everything else is local and works offline.
+It works by parsing the local transcripts (`*.jsonl`) under `~/.claude/projects`. The official `/api/oauth/usage` endpoint is used **only** to show the true `%` and reset time, and to derive the limit; everything else is derived locally from the transcripts. The API is always polled — when it is momentarily unavailable (no token / expired / rate-limited / offline) the `%` and reset time are hidden and usage / burn / breakdown still show.
 
 ## Requirements
 
@@ -26,23 +26,22 @@ bun install
 ## Usage
 
 ```sh
-# Live dashboard (redraws every 5s by default; API fetch on by default)
+# Live dashboard (redraws every 5s by default)
 bun run src/cli.ts watch
 bun run src/cli.ts watch --interval 1 --top 8
-bun run src/cli.ts watch --local           # no API fetch (no network / Keychain)
 
 # Fetch 5h/7d % and the true reset time from /api/oauth/usage
 bun run src/cli.ts usage
 
-# One-shot report
+# One-shot report (% / reset time / limit estimate included when the API is reachable)
 bun run src/cli.ts report --since block                 # current 5h window (default)
-bun run src/cli.ts report --since today --official      # % / reset time / limit estimate
+bun run src/cli.ts report --since today
 bun run src/cli.ts report --since block --expand        # drill the tool breakdown into Workflow/Agent
 bun run src/cli.ts report --since 7d --by tool,model,session,project --top 12
 
 # Snapshot daemon (for the macOS menu-bar app and other external consumers)
 bun run src/cli.ts daemon --emit ~/.cctok/snapshot.json
-bun run src/cli.ts daemon --emit ~/.cctok/snapshot.json --interval 2 --local
+bun run src/cli.ts daemon --emit ~/.cctok/snapshot.json --interval 2
 ```
 
 #### `daemon` JSON contract
@@ -52,9 +51,9 @@ bun run src/cli.ts daemon --emit ~/.cctok/snapshot.json --interval 2 --local
 written to `<path>.tmp` and then `rename(2)`d into place, so readers never observe a
 partial file. The file is created with mode `0600` (owner-only readable), so put it
 under a user-private directory such as `~/.cctok/`. On `SIGINT` / `SIGTERM` the daemon
-exits cleanly and leaves no `.tmp` behind. With `--local` no `/api/oauth/usage` call is
-made; `--official` (default on) includes `%` / reset time / derived limit when the API
-is reachable.
+exits cleanly and leaves no `.tmp` behind. The daemon always polls `/api/oauth/usage`;
+`%` / reset time / derived limit are included when the API is reachable, and are `null`
+while it is momentarily unavailable (see `api_status` for the reason).
 
 The canonical type is `SerializedSnapshot` in [`src/daemon.ts`](./src/daemon.ts) — the
 exact set of fields. The shape below is illustrative; consumers should ignore any keys
@@ -62,7 +61,7 @@ they do not recognise rather than reject the payload.
 
 ```jsonc
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "generated_at": "2026-06-29T02:06:17.954Z", // ISO 8601, when the payload was built
   "snapshot": {
     // The Snapshot type from src/snapshot.ts, with sessionTitles as a plain object
@@ -86,7 +85,6 @@ they do not recognise rather than reject the payload.
   "api_status": {
     // Why % / reset / cumul might be null. Lets consumers show a "rate-limited"
     // or "auth expired" banner instead of silently degrading to a numbers-only view.
-    "enabled":       true,                // false when started with --local
     "ok":            false,               // true iff error == null && a value has been received
     "error":         "HTTP 429",          // null when ok
     "last_fetch_at": 1782698700000,       // null until the first successful fetch
@@ -118,7 +116,7 @@ To use it as `cctok`, either `bun link` or `alias cctok='bun run /path/to/src/cl
 - **Target pace (`Target`).** The burn rate that would spend exactly the remaining tokens (`limit − used`) by reset (remaining ÷ minutes-to-reset). If the actual burn is above it you'll run out before reset; below it you have headroom — compare against the burn line. Shown only when both `limit` and reset time are available.
 - **Unit compression.** Large numbers are compressed to `k` / `M` (`169.7k`, `30.8M`).
 - **Stock-ticker coloring (watch only).** When a value rises between frames it flashes **green ▲**, falls **red ▼**. The marker always reserves a 1-character slot even when unchanged, so following text never shifts horizontally.
-- **% and reset time** are shown only when fetched from `/api/oauth/usage` (`--official`, on by default in watch). When unavailable, only usage / burn / breakdown are shown (no local approximation of the reset).
+- **% and reset time** are shown only when fetched from `/api/oauth/usage` (always attempted). When unavailable, only usage / burn / breakdown are shown (no local approximation of the reset).
 - **Burn / exhaustion ETA.** The exhaustion time is extrapolated from the last-10-minute burn rate. If the projection doesn't run out before reset, the line is hidden.
 
 ### Drilldown (`--expand`, or `Ctrl-O` in watch)
@@ -141,7 +139,7 @@ In watch, an **in-app virtual scroll** (`↑↓` / PageUp/Down / `g`·`G`) lets 
 ## Documentation
 
 - [Token attribution accuracy](./docs/token-attribution.md) — how the measured (`=:`) / estimated (`~:`) hybrid works.
-- [API integration & the 5h window](./docs/api-and-window.md) — `--official` / `usage`, OAuth token resolution, 401 / 429 handling, and the window definition.
+- [API integration & the 5h window](./docs/api-and-window.md) — `usage`, OAuth token resolution, 401 / 429 handling, and the window definition.
 
 ## Development
 
@@ -171,7 +169,7 @@ The core under `src/` (everything except `render/`) is kept reusable so a future
 ## Limitations
 
 - Direct-tool tokens are a `chars/4` approximation (not a real tokenizer); swap the factor in `attribute.ts`.
-- When `--official` is unavailable (no token / expired / offline), `%` and reset time are hidden (usage / burn / breakdown still show).
+- When the official API is unavailable (no token / expired / rate-limited / offline), `%` and reset time are hidden (usage / burn / breakdown still show).
 - The derived limit is a token-unit estimate (the 5h limit is server-side weighted, so it is not a strict ceiling).
 - No automatic token refresh (to avoid breaking the main login via refresh-token rotation / Keychain write-back). Launch `claude` once to refresh.
 

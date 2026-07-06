@@ -2,15 +2,15 @@
 
 [English](./api-and-window.md) | [日本語](./api-and-window.ja.md)
 
-## API integration (`--official` / `usage`)
+## API integration (`usage`)
 
-`%` / reset time / limit are **unified on the API** (`GET https://api.anthropic.com/api/oauth/usage`, OAuth Bearer). The response's `five_hour` / `seven_day` carry `utilization` (`%`) and `resets_at` (the **true reset time**). `cctok`:
+`%` / reset time / limit are **unified on the API** (`GET https://api.anthropic.com/api/oauth/usage`, OAuth Bearer). The response's `five_hour` / `seven_day` carry `utilization` (`%`) and `resets_at` (the **true reset time**). The API is **always polled** — there is no opt-out flag. `cctok`:
 
-- Fixes the displayed **`%` and reset time** from API values (**hides them when unavailable**; no local approximation).
+- Fixes the displayed **`%` and reset time** from API values (**hides them when momentarily unavailable**; no local approximation).
 - Derives the **limit (token estimate)** from the current `%` and current consumption, and uses it for `target pace` and the exhaustion projection.
 - Fixes the window range to `resets_at - 5h` as well (when unavailable, falls back to the last 5h and shows only usage / burn / breakdown).
 
-The OAuth token is read from the **macOS Keychain (`Claude Code-credentials`)** first, falling back to `~/.claude/.credentials.json`. Use `--local` when you don't want to touch the network / Keychain.
+The OAuth token is read from the **macOS Keychain (`Claude Code-credentials`)** first, falling back to `~/.claude/.credentials.json`. When no token is available (or fetching fails), `cctok` degrades to usage / burn / breakdown only — this is transient, not a separate mode.
 
 ### Why `%` may not show (displayed on screen)
 

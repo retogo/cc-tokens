@@ -2,17 +2,17 @@
 
 [English](./api-and-window.md) | [日本語](./api-and-window.ja.md)
 
-## API 連携（`--official` / `usage`）
+## API 連携（`usage`）
 
 % / リセット時刻 / limit は **API（`GET https://api.anthropic.com/api/oauth/usage`、OAuth Bearer）に一本化**している。
-レスポンスの `five_hour` / `seven_day` が `utilization`（%）と `resets_at`（**真のリセット時刻**）を持つ。`cctok` は:
+レスポンスの `five_hour` / `seven_day` が `utilization`（%）と `resets_at`（**真のリセット時刻**）を持つ。API は**常時取得**する（無効化フラグは無い）。`cctok` は:
 
-- 表示の **% と リセット時刻**を API 値で確定する（**取得できなければ表示しない**。ローカル近似は使わない）。
+- 表示の **% と リセット時刻**を API 値で確定する（**一時的に取得できなければ表示しない**。ローカル近似は使わない）。
 - 現在%と現在の消費トークンから **limit（トークン目安）を逆算**し、`目標ペース` と枯渇予測に使う。
 - ウィンドウ範囲も `resets_at - 5h` に確定（取得できない時は直近 5h で使用量・バーン・内訳のみ表示）。
 
 OAuth トークンは **macOS Keychain（`Claude Code-credentials`）** を優先し、無ければ
-`~/.claude/.credentials.json` を読む。ネットワーク/Keychain を使いたくない時は `--local`。
+`~/.claude/.credentials.json` を読む。トークンが無い / 取得に失敗した時は使用量・バーン・内訳のみに degrade する（一時的な状態で、独立したモードではない）。
 
 ### % が出ない時の理由（画面に表示）
 
