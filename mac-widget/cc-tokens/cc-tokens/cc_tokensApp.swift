@@ -12,11 +12,10 @@ import SwiftUI
 @main
 struct cc_tokensApp: App {
 
-    /// v1 はパスをハードコード (個人開発前提)。bun / cli.ts の置き場所が変わったらここを直す。
-    /// 将来は Settings UI または `bun build --compile` で .app に同梱する形に置き換える。
+    /// daemon は scripts/build-daemon.sh が Contents/MacOS/cctok-daemon に同梱する。
+    /// build phase が生成に失敗すればビルドごと落ちるので、ここでは常に存在する。
     private static let daemonConfig = DaemonController.Config(
-        bunPath: "/Users/hirokigoto/.nix-profile/bin/bun",
-        cliPath: "/Users/hirokigoto/git/repos/github.com/retogo/cc-tokens/src/cli.ts",
+        daemonPath: Bundle.main.url(forAuxiliaryExecutable: "cctok-daemon")!.path,
         emitPath: FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".cctok/snapshot.json").path,
         logPath: FileManager.default.homeDirectoryForCurrentUser

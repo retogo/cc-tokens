@@ -13,8 +13,9 @@
 //  対策: start() の重い処理は Task.detached でバックグラウンドに逃がし、@Published の
 //  更新だけ MainActor.run で戻す。
 //
-//  v1 はパスをハードコード (個人開発前提)。bun と cli.ts の場所が変わった時は
-//  この struct を変えるか、将来 Settings UI を足して上書きできるようにする。
+//  spawn するのは .app に同梱した単一バイナリ (scripts/build-daemon.sh が
+//  `bun build --compile` で Contents/MacOS/cctok-daemon に生成する)。実行時に
+//  bun や cli.ts を探さないので、開発環境のツールチェーン配置に依存しない。
 //
 
 import Foundation
@@ -38,8 +39,8 @@ final class DaemonController: ObservableObject {
 
     /// spawn する子プロセスの設定。
     struct Config: Sendable {
-        let bunPath: String
-        let cliPath: String
+        /// .app に同梱した daemon バイナリの絶対パス。
+        let daemonPath: String
         let emitPath: String
         let logPath: String
     }
@@ -134,8 +135,8 @@ final class DaemonController: ObservableObject {
     /// terminationHandler は別スレッドで呼ばれるので state 更新は MainActor 経由で行う。
     private func spawnDaemon() {
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: config.bunPath)
-        proc.arguments = ["run", config.cliPath, "daemon", "--emit", config.emitPath]
+        proc.executableURL = URL(fileURLWithPath: config.daemonPath)
+        proc.arguments = ["daemon", "--emit", config.emitPath]
 
         if let log = try? FileHandle(forWritingTo: URL(fileURLWithPath: config.logPath)) {
             _ = try? log.seekToEnd()
@@ -164,12 +165,12 @@ final class DaemonController: ObservableObject {
         }
     }
 
-    /// `cli.ts daemon` を含むコマンドラインの既存プロセスを pkill する。
+    /// `cctok-daemon daemon` を含むコマンドラインの既存プロセスを pkill する。
     /// バックグラウンド queue 専用 (waitUntilExit が runloop を spin するので main では呼べない)。
     nonisolated private static func killExistingDaemonsBackground() {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        p.arguments = ["-f", "src/cli\\.ts daemon"]
+        p.arguments = ["-f", "cctok-daemon daemon"]
         do {
             try p.run()
             p.waitUntilExit()  // バックグラウンドスレッドなので OK

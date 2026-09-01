@@ -483,8 +483,7 @@ struct ContentView: View {
     // SnapshotReader の実 IO をプレビューで走らせないよう、preview 用のパスはあえて存在しないものを使う。
     // Preview では daemon を spawn したくないので start() を呼ばない controller を直接渡す。
     let previewDaemon = DaemonController(config: DaemonController.Config(
-        bunPath: "/usr/bin/false",
-        cliPath: "/dev/null",
+        daemonPath: "/usr/bin/false",
         emitPath: "/tmp/__cctok_preview.json",
         logPath: "/tmp/__cctok_preview.log"
     ))
