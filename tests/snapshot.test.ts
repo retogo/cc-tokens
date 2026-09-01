@@ -122,14 +122,37 @@ describe("API（/api/oauth/usage）統合", () => {
     expect(s.effectiveLimit!).toBeCloseTo(s.usedWeighted / 0.01, 6);
   });
 
-  test("resetTs が過去（API 失敗中にリセット境界を跨いだ）なら近似モードに退避", async () => {
-    // reset が NOW より 1 分前 = 既に境界跨ぎ後
-    const stale = officialAt(50, -1);
-    const s = await snap(stale);
-    expect(s.resetTs).toBeNull(); // 過去 reset は出さない
-    expect(s.windowStart).toBe(NOW - 5 * 3600_000); // 近似モードへ
-    expect(s.effectiveLimit).toBeNull(); // limit 逆算もスキップ（API 信用しない）
+  test("resetTs が過去（リセット境界を跨いだ）ならその時刻を新ウィンドウの起点にする", async () => {
+    // reset が NOW より 1 分前 = 既に境界跨ぎ後。fixture は全て境界より前にある。
+    const s = await snap(officialAt(50, -1));
+    expect(s.windowStart).toBe(NOW - 60_000); // 過去 reset = 新ウィンドウの開始時刻
+    expect(s.resetTs).toBeNull(); // 次の reset は予測しないので出さない
+    expect(s.effectiveLimit).toBeNull(); // stale な utilization から limit を逆算しない
     expect(s.pct).toBeNull();
+  });
+
+  test("境界跨ぎ後は reset より前のターンを使用量から外す", async () => {
+    // fixture は 00:00:05〜00:01:01。reset を 00:01:00 に置くと後ろ 1 ターンだけが残る。
+    const s = await snap(officialAt(50, -1));
+    expect(s.turns).toBe(1);
+    expect(s.turns).toBeLessThan((await snap()).turns);
+  });
+
+  test("reset 後に消費が無ければ使用量・内訳は空になる", async () => {
+    // reset を全 fixture より後（00:01:30）に置く = リセット直後で無消費の状態。
+    const s = await snap(officialAt(50, -0.5));
+    expect(s.turns).toBe(0);
+    expect(s.hasActivity).toBe(false);
+    expect(s.totals).toEqual({ input: 0, output: 0, cacheCreation: 0, cacheRead: 0 });
+    expect(s.cost).toBe(0);
+    expect(s.breakdowns.byModel).toEqual([]);
+    expect(s.breakdowns.bySession).toEqual([]);
+    expect(s.breakdowns.tools).toEqual([]);
+  });
+
+  test("過去 reset が 5h より古ければ直近 5h にクランプする", async () => {
+    const s = await snap(officialAt(50, -6 * 60));
+    expect(s.windowStart).toBe(NOW - 5 * 3600_000);
   });
 
   test("目標ペースが表示に出る", async () => {

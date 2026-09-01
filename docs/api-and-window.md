@@ -24,3 +24,5 @@ Automatic token refresh is intentionally not implemented (to avoid breaking the 
 ## The 5h window definition
 
 The window is `[reset - 5h, now]`, where `reset` is `resets_at` from `/api/oauth/usage` (when fetched). When unavailable, it uses the last 5h (`[now - 5h, now]`) and does **not** show the reset time (no local approximation). Usage / burn / breakdown are computed from the turns within this window.
+
+Once `resets_at` is in the past — the few minutes between crossing the reset boundary and the next successful fetch — the window becomes `[resets_at, now]`, because a new window started at that moment. Discarding the past reset and falling back to the last 5h would leave already-reset usage visible in the new window's totals and breakdown. A `resets_at` older than 5h is not trusted and clamps to the last 5h. The `%` and the reset time stay hidden while the value is stale.

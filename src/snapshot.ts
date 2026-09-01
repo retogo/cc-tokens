@@ -63,7 +63,7 @@ export function rangeStart(since: Since, now: number): number | null {
 export interface Snapshot {
   now: number;
   windowMs: number;
-  /** 現在ウィンドウの開始時刻（公式 resets_at-5h、無ければ now-5h）。 */
+  /** 現在ウィンドウの開始時刻（未来 resets_at なら -5h、境界跨ぎ後はその resets_at、無ければ now-5h）。 */
   windowStart: number;
   /** ウィンドウ内にアクティビティがあるか。 */
   hasActivity: boolean;
@@ -142,7 +142,8 @@ function sparkBuckets(records: TurnRecord[], from: number, to: number, buckets =
 
 /**
  * scan 結果から現在 5h ウィンドウのスナップショットを作る。
- * ウィンドウは公式 resets_at（あれば）から resets_at-5h に確定し、無ければ直近 5h。
+ * ウィンドウは未来の公式 resets_at があれば resets_at-5h、境界を跨いだ直後（resets_at が
+ * 過去）はその resets_at を起点、どちらも無ければ直近 5h。
  * 内訳・ツール帰属はこのウィンドウ範囲で計算する。
  */
 export function buildSnapshot(
@@ -153,14 +154,21 @@ export function buildSnapshot(
 ): Snapshot {
   const windowMs = config.windowHours * 3600_000;
   const opts = { weighting: config.weighting, overrides: config.priceOverrides };
-  // 過去になった reset 値は API 失敗中の境界跨ぎで起き得るので無効化（近似モードに退避）。
-  // 値を信用すると windowStart が >5h 前、windowEnd < now になり projection が歪む。
-  const officialFive =
-    official?.fiveHour && official.fiveHour.resetsAt > now ? official.fiveHour : null;
+  // 未来の reset を持つ API 値だけが「今のウィンドウ」を説明できる。過去になった値は
+  // API 失敗中に境界を跨いだことを意味し、utilization も前ウィンドウのものなので使わない。
+  const five = official?.fiveHour ?? null;
+  const officialFive = five && five.resetsAt > now ? five : null;
 
-  // ウィンドウ確定: 公式 reset があれば reset-5h、無ければ直近 5h（近似 reset は出さない）。
+  // 過去になった reset は捨てずにウィンドウの起点として使う: その時刻に前のウィンドウが
+  // 終わって新しいウィンドウが始まっている。直近 5h に退避すると、リセット済みの消費が
+  // 新しいウィンドウの使用量・内訳に残って見えてしまう。5h より古い値は信用しない。
+  const rolledOverAt =
+    five && five.resetsAt <= now ? Math.max(five.resetsAt, now - windowMs) : null;
+
+  // ウィンドウ確定: 未来 reset があれば reset-5h、境界跨ぎ後はその reset 時刻、
+  // どちらも無ければ直近 5h（次の reset 時刻は予測しないので出さない）。
   const resetTs = officialFive?.resetsAt ?? null;
-  const windowStart = resetTs !== null ? resetTs - windowMs : now - windowMs;
+  const windowStart = resetTs !== null ? resetTs - windowMs : (rolledOverAt ?? now - windowMs);
   const windowEnd = resetTs ?? windowStart + windowMs;
 
   const recs = scan.records.filter((r) => r.ts >= windowStart && r.ts <= now);
