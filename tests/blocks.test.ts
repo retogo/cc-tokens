@@ -19,6 +19,7 @@ function rec(offsetMs: number, raw: number): TurnRecord {
     project: "/p",
     gitBranch: "main",
     usage,
+    pricing: { cacheCreation1h: 0, webSearchRequests: 0, speed: null, inferenceGeo: null },
     toolsInvoked: [],
     isSidechain: false,
     agentKind: null,

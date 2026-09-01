@@ -44,9 +44,9 @@ export function groupBy(
     acc.usage.output += r.usage.output;
     acc.usage.cacheCreation += r.usage.cacheCreation;
     acc.usage.cacheRead += r.usage.cacheRead;
-    const w = weightedOf(r.usage, r.model, opts.weighting ?? RAW, opts.overrides);
+    const w = weightedOf(r.usage, r.model, opts.weighting ?? RAW, r.pricing, opts.overrides);
     acc.weighted += w;
-    acc.cost += costOf(r.usage, r.model, opts.overrides);
+    acc.cost += costOf(r.usage, r.model, r.pricing, opts.overrides);
     acc.count += 1;
     totalWeighted += w;
   }

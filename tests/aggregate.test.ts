@@ -9,6 +9,7 @@ function rec(partial: Partial<TurnRecord> & { usage: TokenUsage }): TurnRecord {
     sessionId: "s1",
     project: "/p1",
     gitBranch: "main",
+    pricing: { cacheCreation1h: 0, webSearchRequests: 0, speed: null, inferenceGeo: null },
     toolsInvoked: [],
     isSidechain: false,
     agentKind: null,

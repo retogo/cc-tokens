@@ -12,6 +12,7 @@ function rec(ts: number, sessionId = "s"): TurnRecord {
     project: "/p",
     gitBranch: "main",
     usage: { input: 1, output: 1, cacheCreation: 0, cacheRead: 0 },
+    pricing: { cacheCreation1h: 0, webSearchRequests: 0, speed: null, inferenceGeo: null },
     toolsInvoked: [],
     isSidechain: false,
     agentKind: null,

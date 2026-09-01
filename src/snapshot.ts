@@ -114,7 +114,7 @@ export interface Snapshot {
 
 function costSum(records: TurnRecord[], overrides: Config["priceOverrides"]) {
   let c = 0;
-  for (const r of records) c += costOf(r.usage, r.model, overrides);
+  for (const r of records) c += costOf(r.usage, r.model, r.pricing, overrides);
   return c;
 }
 
@@ -176,7 +176,7 @@ export function buildSnapshot(
   const usedRaw = totals.input + totals.output + totals.cacheCreation;
   // usedWeighted は内訳の重み付け参照のために残す（limit/target には使わない）。
   const usedWeighted = recs.reduce(
-    (s, r) => s + weightedOf(r.usage, r.model, config.weighting, config.priceOverrides),
+    (s, r) => s + weightedOf(r.usage, r.model, config.weighting, r.pricing, config.priceOverrides),
     0,
   );
 

@@ -26,6 +26,7 @@ function subRec(
     project: "/p",
     gitBranch: "main",
     usage,
+    pricing: { cacheCreation1h: 0, webSearchRequests: 0, speed: null, inferenceGeo: null },
     toolsInvoked: [],
     isSidechain: true,
     agentKind,

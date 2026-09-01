@@ -146,6 +146,16 @@ export function parseLineFull(line: string, filePath: string): ParsedLine {
         cacheCreation: num(usage.cache_creation_input_tokens),
         cacheRead: num(usage.cache_read_input_tokens),
       },
+      pricing: {
+        cacheCreation1h: isRecord(usage.cache_creation)
+          ? num(usage.cache_creation.ephemeral_1h_input_tokens)
+          : 0,
+        webSearchRequests: isRecord(usage.server_tool_use)
+          ? num(usage.server_tool_use.web_search_requests)
+          : 0,
+        speed: typeof usage.speed === "string" ? usage.speed : null,
+        inferenceGeo: typeof usage.inference_geo === "string" ? usage.inference_geo : null,
+      },
       toolsInvoked: toolNames,
       isSidechain: obj.isSidechain === true || agentKind !== null,
       agentKind,

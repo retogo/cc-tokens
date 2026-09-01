@@ -16,7 +16,7 @@ function weightedSum(
   let weighted = 0;
   let raw = 0;
   for (const r of records) {
-    weighted += weightedOf(r.usage, r.model, w, overrides);
+    weighted += weightedOf(r.usage, r.model, w, r.pricing, overrides);
     raw += r.usage.input + r.usage.output + r.usage.cacheCreation;
   }
   return { weighted, raw };

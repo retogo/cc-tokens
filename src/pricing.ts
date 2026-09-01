@@ -1,16 +1,31 @@
-import type { TokenUsage } from "./types.ts";
+import type { PricingAttributes, TokenUsage } from "./types.ts";
 
-/** $/Mtok 単価。 */
+/** $/Mtok 単価（webSearch のみ $/リクエスト）。 */
 export interface ModelPrice {
   input: number;
   output: number;
+  /** 5 分 TTL の cache write。 */
   cacheWrite: number;
+  /** 1 時間 TTL の cache write。 */
+  cacheWrite1h: number;
   cacheRead: number;
+  /** web search 1 リクエストあたりのドル。 */
+  webSearch: number;
 }
 
-/** 入力単価から cache 単価（write×1.25 / read×0.1）を導出する。 */
+/** web search は全モデル共通で $0.01/リクエスト。 */
+const WEB_SEARCH = 0.01;
+
+/** 入力単価から cache 単価（write 5m ×1.25 / write 1h ×2 / read ×0.1）を導出する。 */
 function fromBase(input: number, output: number): ModelPrice {
-  return { input, output, cacheWrite: input * 1.25, cacheRead: input * 0.1 };
+  return {
+    input,
+    output,
+    cacheWrite: input * 1.25,
+    cacheWrite1h: input * 2,
+    cacheRead: input * 0.1,
+    webSearch: WEB_SEARCH,
+  };
 }
 
 /**
@@ -27,11 +42,34 @@ export const PRICES: Record<string, ModelPrice> = {
 /** 未知モデルの fallback（opus 相当）。 */
 const FALLBACK: ModelPrice = fromBase(5, 25);
 
+/**
+ * fast mode（`speed: "fast"`）の専用価格行。opus 系のみで、世代によって単価が違う。
+ * 部分一致の順序が結果を変えるので、より具体的な id を先に並べる。
+ */
+const FAST_PRICES: ReadonlyArray<readonly [string, ModelPrice]> = [
+  ["opus-5", fromBase(10, 50)],
+  ["opus-4-8", fromBase(10, 50)],
+  ["opus-4-7", fromBase(30, 150)],
+  ["opus-4-6", fromBase(30, 150)],
+];
+
 export type PriceOverrides = Partial<Record<string, Partial<ModelPrice>>>;
 
+/** `inference_geo: "us"` のときのトークン費用の倍率。 */
+const US_GEO_MULTIPLIER = 1.1;
+
 /** モデル文字列を部分一致でファミリ単価に解決する。overrides が最優先。 */
-export function priceFor(model: string, overrides?: PriceOverrides): ModelPrice {
+export function priceFor(
+  model: string,
+  ctx: PricingAttributes,
+  overrides?: PriceOverrides,
+): ModelPrice {
   const m = model.toLowerCase();
+  if (ctx.speed === "fast") {
+    for (const [id, price] of FAST_PRICES) {
+      if (m.includes(id)) return price;
+    }
+  }
   let family: string | null = null;
   for (const key of Object.keys(PRICES)) {
     if (m.includes(key)) {
@@ -48,16 +86,28 @@ export function priceFor(model: string, overrides?: PriceOverrides): ModelPrice 
   return base;
 }
 
+/**
+ * cache write の費用。1h TTL 分は cacheWrite1h、残りは 5m 単価で課金する。
+ * 内訳（cacheCreation1h）は総量（cacheCreation）を超え得ないので頭打ちにする。
+ */
+function cacheWriteCost(usage: TokenUsage, ctx: PricingAttributes, p: ModelPrice): number {
+  const oneHour = Math.min(ctx.cacheCreation1h, usage.cacheCreation);
+  return (oneHour * p.cacheWrite1h + (usage.cacheCreation - oneHour) * p.cacheWrite) / 1_000_000;
+}
+
 /** usage のコスト（ドル）。 */
-export function costOf(usage: TokenUsage, model: string, overrides?: PriceOverrides): number {
-  const p = priceFor(model, overrides);
-  return (
-    (usage.input * p.input +
-      usage.output * p.output +
-      usage.cacheCreation * p.cacheWrite +
-      usage.cacheRead * p.cacheRead) /
-    1_000_000
-  );
+export function costOf(
+  usage: TokenUsage,
+  model: string,
+  ctx: PricingAttributes,
+  overrides?: PriceOverrides,
+): number {
+  const p = priceFor(model, ctx, overrides);
+  const tokens =
+    (usage.input * p.input + usage.output * p.output + usage.cacheRead * p.cacheRead) / 1_000_000 +
+    cacheWriteCost(usage, ctx, p);
+  const geo = ctx.inferenceGeo === "us" ? US_GEO_MULTIPLIER : 1;
+  return tokens * geo + ctx.webSearchRequests * p.webSearch;
 }
 
 /** 加重指標の定義。cost = コスト換算、raw = 生トークン（既定で cache_read 除外）。 */
@@ -73,11 +123,12 @@ export function weightedOf(
   usage: TokenUsage,
   model: string,
   weighting: Weighting,
+  ctx: PricingAttributes,
   overrides?: PriceOverrides,
 ): number {
   if (weighting.mode === "raw") {
     const base = usage.input + usage.output + usage.cacheCreation;
     return weighting.includeCacheRead ? base + usage.cacheRead : base;
   }
-  return costOf(usage, model, overrides);
+  return costOf(usage, model, ctx, overrides);
 }

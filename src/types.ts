@@ -11,6 +11,21 @@ export interface TokenUsage {
   cacheRead: number;
 }
 
+/**
+ * 単価の決定にだけ効く usage の属性。表示 4 カテゴリ（TokenUsage）とは分けて持つ。
+ * TokenUsage は daemon の JSON スキーマに出るので、課金内部値でそれを広げない。
+ */
+export interface PricingAttributes {
+  /** cacheCreation のうち 1h TTL で書かれた分（内数）。5m 分より単価が高い。 */
+  cacheCreation1h: number;
+  /** server_tool_use の web search リクエスト数（トークンではなく件数で課金）。 */
+  webSearchRequests: number;
+  /** `usage.speed`。"fast" なら fast mode の単価で課金される。 */
+  speed: string | null;
+  /** `usage.inference_geo`。"us" ならトークン費用に 1.1 が掛かる。 */
+  inferenceGeo: string | null;
+}
+
 /** サブエージェントの起源（ファイルパス由来）。null はメインセッション。 */
 export type AgentKind = "task" | "workflow" | null;
 
@@ -27,6 +42,8 @@ export interface TurnRecord {
   project: string;
   gitBranch: string;
   usage: TokenUsage;
+  /** 単価の決定に効く usage の属性。 */
+  pricing: PricingAttributes;
   /** このターンで呼ばれた tool_use の name（重複あり）。 */
   toolsInvoked: string[];
   /** サブエージェント（isSidechain）か。 */
