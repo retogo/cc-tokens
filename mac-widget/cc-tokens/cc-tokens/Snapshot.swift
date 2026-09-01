@@ -125,6 +125,15 @@ struct Totals: Decodable {
     let output: Int
     let cacheCreation: Int
     let cacheRead: Int
+
+    /// 入力トークンのうち cache から読めた割合 (0..1)。
+    /// Claude Code 本体のテレメトリと同じ定義で、分母は input + cacheCreation + cacheRead
+    /// (output は入力側の話ではないので含めない)。入力が 0 のときは率が定義できないので nil。
+    var cacheHitRate: Double? {
+        let denominator = input + cacheCreation + cacheRead
+        guard denominator > 0 else { return nil }
+        return Double(cacheRead) / Double(denominator)
+    }
 }
 
 /// バーンレート (重み付き / 生 token の両方を持つ)。

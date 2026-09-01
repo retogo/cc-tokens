@@ -251,6 +251,7 @@ struct ContentView: View {
                 tokenChip(label: "out", value: snap.totals.output)
                 tokenChip(label: "cache w", value: snap.totals.cacheCreation)
                 tokenChip(label: "cache r", value: snap.totals.cacheRead)
+                chip(label: "hit", text: hitRateText(snap.totals.cacheHitRate))
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -371,10 +372,20 @@ struct ContentView: View {
     }
 
     private func tokenChip(label: String, value: Int) -> some View {
+        chip(label: label, text: kiloText(Double(value)))
+    }
+
+    private func chip(label: String, text: String) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(label).foregroundStyle(.tertiary)
-            Text(kiloText(Double(value))).monospacedDigit()
+            Text(text).monospacedDigit()
         }
+    }
+
+    /// cache hit 率。入力トークンが無いウィンドウでは率が定義できないので "—"。
+    private func hitRateText(_ rate: Double?) -> String {
+        guard let rate else { return "—" }
+        return "\(Int((rate * 100).rounded()))%"
     }
 
     private func setupGuide(path: URL) -> some View {
