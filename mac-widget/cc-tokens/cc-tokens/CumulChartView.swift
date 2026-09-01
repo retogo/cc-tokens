@@ -72,6 +72,11 @@ struct CumulChartView: View {
             }
         }
         .chartYScale(domain: 0...110)
+        // X 軸はウィンドウ全体 (windowStart 〜 リセット時刻) に固定する。
+        // 指定しないと Swift Charts が描画済みマークの範囲に自動追従し、リセット直後など
+        // now がリセット時刻から離れている間はグラフが now で切れて、prediction が
+        // 表示域の外に出てしまう。
+        .chartXScale(domain: time(at: 0)...time(at: 1))
         .chartXAxis {
             // 5h ウィンドウなら 5-6 個程度の hour mark が出る。
             AxisMarks(values: .stride(by: .hour)) { _ in
