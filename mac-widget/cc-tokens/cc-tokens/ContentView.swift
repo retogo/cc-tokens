@@ -62,7 +62,7 @@ struct ContentView: View {
         HStack {
             Image(systemName: "gauge.with.dots.needle.bottom.50percent")
                 .foregroundStyle(.tint)
-            Text("cctok")
+            Text("CC Tokens")
                 .font(.system(.headline, design: .rounded))
             Spacer()
             ageBadge
