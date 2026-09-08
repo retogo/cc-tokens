@@ -138,6 +138,16 @@ final class DaemonController: ObservableObject {
         proc.executableURL = URL(fileURLWithPath: config.daemonPath)
         proc.arguments = ["daemon", "--emit", config.emitPath]
 
+        // daemon は Bun の compiled binary で、TLS 検証に Bun 同梱の CA バンドルしか使わない。
+        // 社内 SSL forward proxy が TLS を代行する環境では証明書チェーンのルートが未知になり、
+        // /api/oauth/usage が "self signed certificate in certificate chain" で恒久的に失敗する
+        // (curl や Safari は macOS の信頼ストアを見るので通る、という非対称になる)。
+        // --use-system-ca で macOS が信頼している CA に揃える。compiled binary はフラグを直接
+        // 受け取らない (引数はスクリプトへ渡る) ため BUN_OPTIONS 経由で渡す。
+        var env = ProcessInfo.processInfo.environment
+        env["BUN_OPTIONS"] = "--use-system-ca"
+        proc.environment = env
+
         if let log = try? FileHandle(forWritingTo: URL(fileURLWithPath: config.logPath)) {
             _ = try? log.seekToEnd()
             proc.standardOutput = log
